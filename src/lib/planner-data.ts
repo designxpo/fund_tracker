@@ -1,0 +1,123 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { addDays, cycleEnd } from "@/lib/budget";
+import { project } from "@/lib/loan";
+import { addMonths, recurringExtra, simulate, type PlanChange, type PlanLine, type PlannerInputs } from "@/lib/planner";
+import { ok } from "@/lib/use-data";
+import type { Cycle } from "@/lib/types";
+
+export type GoalRow = {
+  id: string;
+  name: string;
+  target: number | null;
+  opening_balance: number;
+  is_custom: boolean;
+  icon: string | null;
+  target_date: string | null;
+  priority: number;
+  balance: number;
+};
+
+export type IncomeRow = { id: string; amount: number; source: string; received_on: string; recurring: boolean; note: string | null };
+export type PlanItemRow = PlanLine & { id: string };
+export type Split = { goal_id: string; pct: number }[];
+
+/** Everything the planner screens need, plus a ready-made `inputs` for `simulate`. */
+export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: string) {
+  const [goals, txs, items, changes, loans, income, settings] = await Promise.all([
+    sb.from("goals").select("*").then(ok),
+    sb.from("goal_transactions").select("goal_id, amount").then(ok),
+    sb.from("plan_items").select("id, name, kind, planned, goal_id").eq("cycle_id", cycle.id).then(ok),
+    sb.from("plan_changes").select("id, name, effective_from, planned").then(ok),
+    sb.from("loan").select("*").limit(1).then(ok),
+    sb.from("income").select("*").order("received_on", { ascending: false }).limit(200).then(ok),
+    sb.from("settings").select("income_split").maybeSingle().then(ok),
+  ]);
+
+  const txSum = new Map<string, number>();
+  (txs as { goal_id: string; amount: number }[]).forEach((t) => txSum.set(t.goal_id, (txSum.get(t.goal_id) ?? 0) + Number(t.amount)));
+
+  const goalRows: GoalRow[] = (goals as Record<string, unknown>[]).map((g) => ({
+    id: g.id as string,
+    name: g.name as string,
+    target: g.target == null ? null : Number(g.target),
+    opening_balance: Number(g.opening_balance ?? 0),
+    is_custom: Boolean(g.is_custom),
+    icon: (g.icon as string) ?? null,
+    target_date: (g.target_date as string) ?? null,
+    priority: Number(g.priority ?? 2),
+    balance: Number(g.opening_balance ?? 0) + (txSum.get(g.id as string) ?? 0),
+  }));
+
+  const lines: PlanItemRow[] = (items as Record<string, unknown>[]).map((i) => ({
+    id: i.id as string,
+    name: i.name as string,
+    kind: i.kind as string,
+    planned: Number(i.planned),
+    goal_id: (i.goal_id as string) ?? null,
+  }));
+  const changeRows = (changes as (PlanChange & { id: string })[]).map((c) => ({ ...c, planned: Number(c.planned) }));
+  const incomeRows: IncomeRow[] = (income as IncomeRow[]).map((i) => ({ ...i, amount: Number(i.amount) }));
+
+  // Projection starts at the next salary.
+  const start = addDays(cycleEnd(cycle.starts_on, cycle.ends_on), 1).slice(0, 7);
+
+  // Which plan lines belong to the loan (its EMI + prepayments), and when do they stop?
+  // Close date comes from the loan inputs if filled in, else the original end date.
+  const loan = (loans as Record<string, unknown>[])[0];
+  const loanName = String(loan?.name ?? "Loan").toLowerCase();
+  const loanLines = lines
+    .filter((l) => l.kind === "prepayment" || (l.kind === "loan" && l.name.toLowerCase().startsWith(loanName)))
+    .map((l) => l.name);
+  const prepayLines = lines.filter((l) => l.kind === "prepayment");
+  let loanFreeFrom: string | null = null;
+  if (loan) {
+    const P = Number(loan.outstanding ?? 0);
+    const rate = loan.annual_rate == null ? null : Number(loan.annual_rate);
+    const prepay = Math.max(
+      0,
+      ...prepayLines.map((l) => l.planned),
+      ...changeRows.filter((c) => prepayLines.some((l) => l.name === c.name)).map((c) => c.planned),
+    );
+    const p = P > 0 && rate != null ? project(P, rate, Number(loan.emi), prepay) : null;
+    loanFreeFrom = p?.feasible
+      ? addMonths(start, Math.ceil(p.months))
+      : loan.original_end
+        ? addMonths(String(loan.original_end).slice(0, 7), 1)
+        : null;
+  }
+
+  const extraMonthly = recurringExtra(incomeRows, today);
+
+  const inputs: PlannerInputs = {
+    start,
+    cycleStart: cycle.starts_on,
+    salary: Number(cycle.salary),
+    dailyBudget: Number(cycle.daily_budget),
+    extraMonthly,
+    lines,
+    changes: changeRows,
+    loanFreeFrom,
+    loanLines,
+  };
+
+  const custom = goalRows.filter((g) => g.is_custom);
+  const plannerGoals = custom.map((g) => ({ id: g.id, remaining: (g.target ?? 0) - g.balance, priority: g.priority, target_date: g.target_date }));
+
+  return {
+    inputs,
+    goals: goalRows,
+    custom,
+    plannerGoals,
+    results: simulate(inputs, plannerGoals),
+    lines,
+    changes: changeRows,
+    income: incomeRows,
+    extraMonthly,
+    split: ((settings as { income_split: Split | null } | null)?.income_split ?? null) as Split | null,
+  };
+}
+
+export type PlannerData = Awaited<ReturnType<typeof loadPlanner>>;
+
+export const GOAL_ICONS = ["📱", "💻", "🏍️", "🚗", "✈️", "🏠", "💍", "🎓", "🎮", "📷", "🎁", "🎯"];
+export const PRIORITY = { 1: "High", 2: "Medium", 3: "Low" } as const;

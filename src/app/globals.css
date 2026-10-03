@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #eef3fb;
+  --surface: #ffffff;
+  --ink: #0f1b3d;
+  --muted: #6b7691;
+  --line: #e3e9f4;
+  --navy: #14264f;
+  --navy-2: #1d3470;
+  --mint: #4fe0ad;
+  --good: #12a37a;
+  --warn: #e8960b;
+  --bad: #e5484d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #080d1c;
+    --surface: #111a33;
+    --ink: #eaf0ff;
+    --muted: #8d9abb;
+    --line: #1f2b4b;
+    --navy: #17254d;
+    --navy-2: #22377a;
+    --good: #3ddc9e;
+    --warn: #f5b042;
+    --bad: #ff6b70;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-navy: var(--navy);
+  --color-navy-2: var(--navy-2);
+  --color-mint: var(--mint);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --font-sans: var(--font-geist-sans);
+}
+
+html {
+  background: var(--bg);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  overscroll-behavior-y: none;
+}
+
+button {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@keyframes toast-in {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.toast-in { animation: toast-in .18s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0s !important; animation-duration: 0s !important; }
+}
