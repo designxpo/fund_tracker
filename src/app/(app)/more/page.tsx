@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 const LINKS = [
   { href: "/more/income", title: "Extra income", sub: "Freelance, bonus, refunds: split into goals", icon: "💰" },
   { href: "/more/loan", title: "Loan", sub: "Payoff, prepayments, what-if", icon: "🏦" },
+  { href: "/more/password", title: "Change password", sub: "Set a new sign-in password", icon: "🔑" },
   { href: "/more/settings", title: "Settings", sub: "Budget, cards, categories, plan, export", icon: "⚙️" },
 ];
 
