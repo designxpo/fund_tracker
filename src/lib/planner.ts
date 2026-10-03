@@ -1,22 +1,23 @@
 // Month-by-month goal planner. Pure, no imports, so it can be unit-tested directly.
 //
 // Free money each month = salary + recurring extra income − daily spending − plan commitments.
-// Commitments follow scheduled plan changes and drop the loan's lines once it closes.
+// Commitments follow month-specific plan templates and drop the loan's lines once it closes.
 // Custom goals receive their own committed plan lines, then free money in priority order.
 
 export type YM = string; // "YYYY-MM"
 
 export type PlanLine = { name: string; kind: string; planned: number; goal_id: string | null };
-export type PlanChange = { name: string; effective_from: string; planned: number };
+/** A month's plan; applies from `month` until a later template takes over. */
+export type PlanTemplate = { month: YM; lines: PlanLine[] };
 
 export type PlannerInputs = {
   start: YM;                    // first month to project (the next salary)
-  cycleStart: string;           // current cycle start; only changes after it are "scheduled"
+  cycleStart: string;           // current cycle start; only templates for later months are "scheduled"
   salary: number;
   dailyBudget: number;
   extraMonthly: number;         // recurring extra income
-  lines: PlanLine[];
-  changes: PlanChange[];
+  lines: PlanLine[];            // the current cycle's plan
+  templates: PlanTemplate[];
   loanFreeFrom: YM | null;      // first month with no loan EMI/prepayment
   loanLines: string[];          // plan lines that stop when the loan closes
 };
@@ -45,18 +46,24 @@ export const ymLabel = (ym: YM) => {
   return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 };
 
+/** The plan in force in month `ym`: the latest template that starts after the current cycle, else the current plan. */
+export function linesFor(ym: YM, inp: PlannerInputs): PlanLine[] {
+  const cycleMonth = inp.cycleStart.slice(0, 7);
+  const t = inp.templates
+    .filter((x) => x.month > cycleMonth && x.month <= ym)
+    .sort((a, b) => (a.month < b.month ? 1 : -1))[0];
+  return t ? t.lines : inp.lines;
+}
+
 export function lineAmount(line: PlanLine, ym: YM, inp: PlannerInputs): number {
   if (inp.loanFreeFrom && inp.loanLines.includes(line.name) && ym >= inp.loanFreeFrom) return 0;
-  const change = inp.changes
-    .filter((c) => c.name === line.name && c.effective_from > inp.cycleStart && c.effective_from.slice(0, 7) <= ym)
-    .sort((a, b) => (a.effective_from < b.effective_from ? 1 : -1))[0];
-  return change ? change.planned : line.planned;
+  return line.planned;
 }
 
 const isCommitment = (l: PlanLine) => l.kind !== "bills" && l.kind !== "unspent";
 
 export function commitments(ym: YM, inp: PlannerInputs) {
-  return inp.lines.filter(isCommitment).reduce((s, l) => s + lineAmount(l, ym, inp), 0);
+  return linesFor(ym, inp).filter(isCommitment).reduce((s, l) => s + lineAmount(l, ym, inp), 0);
 }
 
 export function freeMoney(ym: YM, inp: PlannerInputs) {
@@ -74,7 +81,7 @@ export function simulate(inp: PlannerInputs, goals: PlannerGoal[]): Record<strin
     let pool = Math.max(0, freeMoney(ym, inp));
     for (const g of order) {
       if (done.has(g.id)) continue;
-      const own = inp.lines.filter((l) => l.goal_id === g.id).reduce((s, l) => s + lineAmount(l, ym, inp), 0);
+      const own = linesFor(ym, inp).filter((l) => l.goal_id === g.id).reduce((s, l) => s + lineAmount(l, ym, inp), 0);
       left.set(g.id, left.get(g.id)! - own);
     }
     for (const g of order) {

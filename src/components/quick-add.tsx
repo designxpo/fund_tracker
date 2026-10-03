@@ -4,10 +4,11 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { flushSync } from "react-dom";
 import { useStore } from "@/lib/store";
 import { useToast } from "@/components/toast";
-import { cycleEnd, isBirthdayWindow, sumBetween, summarize, suggestCardId } from "@/lib/budget";
+import { addDays, cycleEnd, dailyOnly, isBirthdayWindow, parseYmd, sumBetween, summarize, suggestCardId } from "@/lib/budget";
+import { createClient } from "@/lib/supabase/client";
 import { inr } from "@/lib/money";
 import { spendImpact } from "@/lib/alerts";
-import type { Spend } from "@/lib/types";
+import { isDaily, type Spend, type SpendType, type StorePlanItem } from "@/lib/types";
 
 type QA = { open: (editing?: Spend) => void };
 const QACtx = createContext<QA>({ open: () => {} });
@@ -31,6 +32,22 @@ function useKeyboardInset() {
   return inset;
 }
 
+const TYPES: { key: SpendType; label: string }[] = [
+  { key: "daily", label: "Daily" },
+  { key: "planned", label: "Planned" },
+  { key: "unplanned", label: "Unplanned" },
+];
+
+/** Plan items an unplanned shortfall may be taken from. Emergency fund is never offered here. */
+const COVER_FIRST = ["Trip fund", "Index fund", "Navi prepayment"];
+
+const shortDate = (iso: string) => parseYmd(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+const addMonthsIso = (iso: string, months: number) => {
+  const d = parseYmd(iso);
+  d.setMonth(d.getMonth() + months);
+  return addDays(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, 0);
+};
+
 const cleanAmount = (v: string) => {
   const s = v.replace(/[^\d.]/g, "");
   const [i, ...rest] = s.split(".");
@@ -38,7 +55,7 @@ const cleanAmount = (v: string) => {
 };
 
 export function QuickAddProvider({ children }: { children: React.ReactNode }) {
-  const { cards, categories, spends, cycle, today, settings, addSpend, updateSpend } = useStore();
+  const { cards, categories, spends, cycle, today, settings, goals, planItems, addSpend, updateSpend, reload } = useStore();
   const toast = useToast();
   const inset = useKeyboardInset();
   const amountRef = useRef<HTMLInputElement>(null);
@@ -53,6 +70,10 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const [date, setDate] = useState("");
   const [allCats, setAllCats] = useState(false);
   const [confirmedKey, setConfirmedKey] = useState("");
+  const [spendType, setSpendType] = useState<SpendType>("daily");
+  const [fundId, setFundId] = useState<string | null>(null);
+  const [covering, setCovering] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const open = (spend?: Spend) => {
     // Synchronous so focus() below still counts as part of the tap (iOS needs this to raise the keyboard).
@@ -66,6 +87,9 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
       setDate(spend?.spent_on ?? today);
       setAllCats(false);
       setConfirmedKey("");
+      setSpendType(spend?.spend_type ?? "daily");
+      setFundId(spend?.spend_type === "planned" ? (spend.goal_id ?? null) : null);
+      setCovering(false);
       setOpen(true);
     });
     amountRef.current?.focus({ preventScroll: true });
@@ -92,6 +116,19 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const card = cards.find((c) => c.id === cardId);
   const suggested = cards.find((c) => c.id === suggestedId);
 
+  // Funds: planned → a sinking fund, unplanned → the Surprise buffer used by this cycle's plan.
+  const sinkingFunds = goals.filter((g) => g.kind === "sinking").sort((a, b) => (a.next_due_date ?? "9") .localeCompare(b.next_due_date ?? "9"));
+  const bufferGoalId = planItems.find((i) => i.kind === "buffer")?.goal_id;
+  const buffer = goals.find((g) => g.id === bufferGoalId) ?? goals.find((g) => g.kind === "buffer");
+  const emergency = goals.find((g) => g.name === "Emergency fund");
+  const fund =
+    spendType === "planned" ? (sinkingFunds.find((g) => g.id === fundId) ?? sinkingFunds[0]) : spendType === "unplanned" ? buffer : undefined;
+  // When editing, this spend's own withdrawal is already in the balance: add it back.
+  const fundAvail = fund
+    ? fund.balance + (editing && !isDaily(editing) && editing.goal_id === fund.id ? Number(editing.amount) : 0)
+    : 0;
+  const shortfall = spendType === "unplanned" ? Math.max(0, amt - fundAvail) : 0;
+
   // Most-used categories first (this cycle), then configured order.
   const sortedCats = useMemo(() => {
     const counts = new Map<string, number>();
@@ -102,27 +139,28 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   }, [categories, spends]);
   const visibleCats = allCats ? sortedCats : sortedCats.slice(0, 6);
 
-  const canSave = amt > 0 && !!categoryId;
+  const canSave = amt > 0 && !!categoryId && (spendType === "daily" || !!fund);
 
   // Live preview: what would this spend do to today / this week / this cycle?
   const impact = useMemo(() => {
-    if (!cycle || !(amt > 0) || !isOpen) return null;
+    if (!cycle || !(amt > 0) || !isOpen || spendType !== "daily") return null;
     const others = spends.filter((s) => s.id !== editing?.id);
     const draft = { amount: amt, spent_on: date || today, card_id: null };
     return spendImpact(summarize(others, cycle, today), summarize([...others, draft], cycle, today));
-  }, [cycle, amt, isOpen, spends, editing?.id, date, today]);
+  }, [cycle, amt, isOpen, spends, editing?.id, date, today, spendType]);
 
   // Would this spend push the chosen card past its monthly cap?
+  const capSpends = dailyOnly(spends.filter((s) => s.id !== editing?.id));
   const cardSpentBefore =
     card && cycle
       ? sumBetween(
-          spends.filter((s) => s.id !== editing?.id),
+          capSpends,
           cycle.starts_on,
           cycleEnd(cycle.starts_on, cycle.ends_on),
           card.id,
         )
       : 0;
-  const overCap = !!card && card.monthly_cap > 0 && cardSpentBefore + amt > card.monthly_cap;
+  const overCap = spendType === "daily" && !!card && card.monthly_cap > 0 && cardSpentBefore + amt > card.monthly_cap;
   const overKey = `${cardId}:${amt}`;
   const needsConfirm = overCap && confirmedKey !== overKey;
   const switchTo = overCap
@@ -131,7 +169,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
           c.id !== cardId &&
           c.monthly_cap > 0 &&
           sumBetween(
-            spends.filter((s) => s.id !== editing?.id),
+            capSpends,
             cycle!.starts_on,
             cycleEnd(cycle!.starts_on, cycle!.ends_on),
             c.id,
@@ -142,12 +180,20 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const save = () => {
     if (!canSave || !cycle) return;
     if (needsConfirm) return; // the confirm bar handles this case
+    if (shortfall > 0) return setCovering(true); // buffer can't cover it: pick where the rest comes from
+    commit();
+  };
+
+  const commit = () => {
+    if (!cycle) return;
     const payload = {
       amount: amt,
       category_id: categoryId,
       card_id: cardId,
       note: note.trim() || null,
       spent_on: date || today,
+      spend_type: spendType,
+      goal_id: spendType === "daily" ? null : (fund?.id ?? null),
     };
     let next: Spend[];
     if (editing) {
@@ -157,11 +203,74 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
       const created = addSpend(payload);
       next = [...spends, created];
     }
-    const left = summarize(next, cycle, today).leftToday;
-    const tail = left >= 0 ? `${inr(left)} left today` : `${inr(-left)} over today`;
-    toast({ msg: `${inr(amt)} · ${category?.name} · ${card?.nickname ?? "No card"} — ${tail}` });
+    let msg: string;
+    if (spendType === "daily") {
+      const left = summarize(next, cycle, today).leftToday;
+      msg = `${inr(amt)} · ${category?.name} · ${card?.nickname ?? "No card"} — ${left >= 0 ? `${inr(left)} left today` : `${inr(-left)} over today`}`;
+    } else if (spendType === "planned" && fund) {
+      const movesDue = fund.next_due_date && !(editing && editing.spend_type === "planned" && editing.goal_id === fund.id);
+      msg = `${inr(amt)} from ${fund.name} → ${inr(fundAvail - amt)} left${movesDue ? ` · next due ${shortDate(addMonthsIso(fund.next_due_date!, fund.cycle_months ?? 1))}` : ""}`;
+    } else {
+      msg = `${inr(amt)} from ${fund?.name ?? "Surprise buffer"} → ${inr(Math.max(0, fundAvail - amt))} left · daily budget untouched`;
+    }
+    toast({ msg });
+    setCovering(false);
     close();
   };
+
+  /** Move the shortfall into the buffer from a plan item (or, if confirmed, the Emergency fund), then save. */
+  async function coverFrom(item: StorePlanItem | "emergency") {
+    if (!buffer) return;
+    const sb = createClient();
+    const need = shortfall;
+    setBusy(true);
+    try {
+      const check = (r: { error: { message: string } | null }) => {
+        if (r.error) throw new Error(r.error.message);
+      };
+      if (item === "emergency") {
+        if (!emergency) return;
+        if (!confirm(`Take ${inr(need)} from your Emergency fund to cover this? Only do this for a real emergency.`)) return;
+        check(await sb.from("goal_transactions").insert({ goal_id: emergency.id, amount: -need, note: "Moved to Surprise buffer", happened_on: today }));
+      } else if (item.done) {
+        // Already moved on Salary Day: take it back out of that goal/prepayment.
+        const newActual = Math.max(0, (item.actual ?? item.planned) - need);
+        check(await sb.from("plan_items").update({ actual: newActual }).eq("id", item.id));
+        check(await sb.from("goal_transactions").update({ amount: newActual }).eq("plan_item_id", item.id));
+        check(await sb.from("loan_prepayments").update({ amount: newActual }).eq("plan_item_id", item.id));
+      } else {
+        check(
+          await sb
+            .from("plan_items")
+            .update({ planned: Math.max(0, item.planned - need), ...(item.actual != null && { actual: Math.max(0, item.actual - need) }) })
+            .eq("id", item.id),
+        );
+      }
+      check(
+        await sb.from("goal_transactions").insert({
+          goal_id: buffer.id,
+          amount: need,
+          note: `Covered from ${item === "emergency" ? "Emergency fund" : item.name}`,
+          happened_on: today,
+        }),
+      );
+      await reload();
+      commit();
+    } catch (e) {
+      toast({ msg: e instanceof Error ? e.message : "Couldn't move the money" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const coverOptions = planItems
+    .filter((i) => (i.kind === "savings" || i.kind === "prepayment") && i.goal_id !== emergency?.id)
+    .map((i) => ({ item: i, available: i.done ? (i.actual ?? i.planned) : i.planned }))
+    .filter((o) => o.available > 0)
+    .sort((a, b) => {
+      const ra = COVER_FIRST.indexOf(a.item.name), rb = COVER_FIRST.indexOf(b.item.name);
+      return (ra < 0 ? 99 : ra) - (rb < 0 ? 99 : rb) || b.available - a.available;
+    });
 
   return (
     <QACtx.Provider value={{ open }}>
@@ -195,6 +304,23 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
           <div className="overflow-y-auto px-5 pt-3">
             <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-ink/15" />
 
+            <div role="radiogroup" aria-label="Spend type" className="mb-2 grid grid-cols-3 rounded-full bg-ink/[.06] p-0.5 text-[13px] font-semibold">
+              {TYPES.map((t) => (
+                <button
+                  key={t.key}
+                  role="radio"
+                  aria-checked={spendType === t.key}
+                  onClick={() => {
+                    setSpendType(t.key);
+                    setCovering(false);
+                  }}
+                  className={`h-8 rounded-full transition ${spendType === t.key ? "bg-white text-ink shadow-[0_2px_8px_-2px_rgba(20,38,79,.25)]" : "text-muted"}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
             <label className="flex items-baseline gap-1 border-b border-line pb-2">
               <span className="text-3xl font-semibold text-muted">₹</span>
               <input
@@ -209,6 +335,35 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
                 className="w-full bg-transparent text-4xl font-bold tabular-nums outline-none placeholder:text-line"
               />
             </label>
+            {spendType === "planned" &&
+              (sinkingFunds.length === 0 ? (
+                <p className="mt-1.5 text-sm text-warn">No sinking funds yet. Add one under Goals first.</p>
+              ) : (
+                <>
+                  <Chips>
+                    {sinkingFunds.map((f) => (
+                      <Chip key={f.id} active={fund?.id === f.id} onClick={() => setFundId(f.id)}>
+                        {f.name} · {inr(Math.round(f.balance))}
+                      </Chip>
+                    ))}
+                  </Chips>
+                  {fund && amt > 0 && (
+                    <p className={`mt-1.5 text-sm ${fundAvail - amt < 0 ? "font-medium text-warn" : "text-muted"}`}>
+                      {fund.name}: {inr(fundAvail)} → {inr(fundAvail - amt)}
+                      {fundAvail - amt < 0 ? " (more than the fund holds)" : ""} · daily budget untouched
+                    </p>
+                  )}
+                </>
+              ))}
+            {spendType === "unplanned" && (
+              <p className={`mt-1.5 text-sm ${shortfall > 0 ? "font-medium text-bad" : "text-muted"}`}>
+                {buffer
+                  ? shortfall > 0
+                    ? `Surprise buffer has ${inr(fundAvail)}: ${inr(shortfall)} short. You'll pick where the rest comes from.`
+                    : `From Surprise buffer: ${inr(fundAvail)}${amt > 0 ? ` → ${inr(fundAvail - amt)}` : " available"} · daily budget untouched`
+                  : "No Surprise buffer found."}
+              </p>
+            )}
             {impact && (
               <p role={impact.level === "over" ? "alert" : undefined} className={`mt-1.5 text-sm ${impact.level === "over" ? "font-medium text-bad" : "text-muted"}`}>
                 {impact.level === "over" ? "⛔ " : ""}
@@ -276,7 +431,46 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="px-5 pb-[max(12px,env(safe-area-inset-bottom))] pt-1">
-            {canSave && needsConfirm ? (
+            {covering && shortfall > 0 ? (
+              <div role="alertdialog" aria-label="Cover the shortfall" className="rounded-2xl border border-bad/30 bg-bad/[.07] p-3">
+                <p className="text-sm">
+                  Your Surprise buffer is <b>{inr(shortfall)} short</b>. Take it from this cycle&apos;s plan:
+                </p>
+                {!navigator.onLine && <p className="mt-1 text-xs text-warn">You&apos;re offline: connect to move money between funds.</p>}
+                <ul className="mt-2 space-y-1.5">
+                  {coverOptions.map(({ item, available }) => (
+                    <li key={item.id}>
+                      <button
+                        disabled={busy || available < shortfall || !navigator.onLine}
+                        onClick={() => coverFrom(item)}
+                        className="flex h-11 w-full items-center justify-between rounded-xl bg-white/80 px-3 text-sm disabled:opacity-40"
+                      >
+                        <span className="font-medium">{item.name}</span>
+                        <span className="text-muted">
+                          {inr(available)} → {inr(Math.max(0, available - shortfall))}
+                          {item.done ? " · already moved" : ""}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                  {coverOptions.length === 0 && <li className="text-xs text-muted">No plan items left to reduce this cycle.</li>}
+                </ul>
+                <div className="mt-2 flex items-center justify-between">
+                  <button onClick={() => setCovering(false)} className="h-10 text-sm text-muted">
+                    Cancel
+                  </button>
+                  {emergency && (
+                    <button
+                      disabled={busy || !navigator.onLine}
+                      onClick={() => coverFrom("emergency")}
+                      className="h-10 text-xs font-medium text-bad underline disabled:opacity-40"
+                    >
+                      Use Emergency fund instead…
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : canSave && needsConfirm ? (
               <div role="alertdialog" className="rounded-2xl border border-warn/50 bg-warn/10 p-3">
                 <p className="text-sm">
                   <b>{card?.nickname}</b> would reach {inr(cardSpentBefore + amt)} of its {inr(card?.monthly_cap ?? 0)} cap.

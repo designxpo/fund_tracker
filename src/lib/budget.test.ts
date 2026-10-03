@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cycleEnd, summarize, capLevel, suggestCardId, diffDays, isBirthdayWindow, billsDueSoon, ordinal, salaryPromptDue } from "./budget.ts";
+import { sinkingDueSoon, sinkingTarget, cycleEnd, summarize, capLevel, suggestCardId, diffDays, isBirthdayWindow, billsDueSoon, ordinal, salaryPromptDue } from "./budget.ts";
 
 const cycle = { starts_on: "2026-10-01", ends_on: null, daily_budget: 500 };
 
@@ -78,4 +78,25 @@ test("salary prompt only in day 1-3 of a later month", () => {
   assert.ok(salaryPromptDue("2026-10-01", "2026-11-02"));
   assert.ok(!salaryPromptDue("2026-11-01", "2026-11-02"));
   assert.ok(!salaryPromptDue("2026-10-01", "2026-11-10"));
+});
+
+test("planned and unplanned spends don't touch the daily/weekly/cycle budget", () => {
+  const spends = [
+    { amount: 7500, spent_on: "2026-10-03", spend_type: "planned" },
+    { amount: 700, spent_on: "2026-10-03", spend_type: "unplanned" },
+    { amount: 120, spent_on: "2026-10-03", spend_type: "daily" },
+    { amount: 80, spent_on: "2026-10-03" }, // old rows without a type count as daily
+  ];
+  const s = summarize(spends, cycle, "2026-10-03");
+  assert.equal(s.leftToday, 300);
+  assert.equal(s.week.spent, 200);
+  assert.equal(s.cycle.spent, 200);
+});
+
+test("sinking fund banner 5 days before due, with ready/short", () => {
+  const sup = { name: "Supplements", kind: "sinking", next_due_date: "2026-12-01", balance: 3750, target: 7500, monthly_contribution: 3750, cycle_months: 2 };
+  assert.equal(sinkingDueSoon([sup], "2026-11-25").length, 0);
+  assert.deepEqual(sinkingDueSoon([sup], "2026-11-26"), [{ name: "Supplements", due: "2026-12-01", inDays: 5, short: 3750 }]);
+  assert.equal(sinkingDueSoon([{ ...sup, balance: 7500 }], "2026-12-01")[0].short, 0);
+  assert.equal(sinkingTarget({ target: null, monthly_contribution: 3750, cycle_months: 2 }), 7500);
 });

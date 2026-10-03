@@ -4,7 +4,7 @@ Next.js (App Router) + Tailwind + Supabase. Spec: `../spend-tracker-app-spec.md`
 
 ## Setup
 1. Create a Supabase project. In the SQL editor run, in order:
-   `supabase/migrations/0001_init.sql`, `0002_phases_2_4.sql`, `0003_planner_income.sql`
+   `supabase/migrations/0001_init.sql`, `0002_phases_2_4.sql`, `0003_planner_income.sql`, `0004_spend_types_sinking.sql`
    (tables, RLS on every table, seed, salary-day rollover, goal planner, extra income).
 2. Auth → Email templates → *Magic Link*: add `{{ .Token }}` to the body, e.g.
    `Your code: {{ .Token }}`. This enables the 6-digit code on the login screen, which is the reliable

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Bar, BarChart, Cell, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useStore } from "@/lib/store";
-import { addDays, capLevel, diffDays, parseYmd } from "@/lib/budget";
+import { addDays, capLevel, dailyOnly, diffDays, parseYmd } from "@/lib/budget";
 import { inr } from "@/lib/money";
 
 const PALETTE = ["#4fe0ad", "#5b8def", "#f5b042", "#ff7a7e", "#a78bfa", "#38bdf8", "#fb923c", "#34d399", "#94a3b8"];
@@ -16,10 +16,16 @@ export default function InsightsPage() {
   const range = summary ? (mode === "week" ? summary.week : summary.cycle) : null;
   const daily = Number(cycle?.daily_budget ?? 500);
 
-  const inRange = useMemo(
+  // Charts, categories and caps use daily spends; planned/unplanned are summarised separately.
+  const allInRange = useMemo(
     () => (range ? spends.filter((s) => s.spent_on >= range.start && s.spent_on <= range.end) : []),
     [spends, range],
   );
+  const inRange = useMemo(() => dailyOnly(allInRange), [allInRange]);
+  const outside = {
+    planned: allInRange.filter((s) => s.spend_type === "planned").reduce((t, s) => t + s.amount, 0),
+    unplanned: allInRange.filter((s) => s.spend_type === "unplanned").reduce((t, s) => t + s.amount, 0),
+  };
 
   const days = useMemo(() => {
     if (!range) return [];
@@ -97,8 +103,22 @@ export default function InsightsPage() {
         </div>
       </section>
 
+      {(outside.planned > 0 || outside.unplanned > 0) && (
+        <section className="grid grid-cols-2 gap-3">
+          <div className="rounded-2xl bg-surface p-3">
+            <p className="text-xs text-muted">Planned (from funds)</p>
+            <p className="text-lg font-semibold tabular-nums">{inr(outside.planned)}</p>
+          </div>
+          <div className="rounded-2xl bg-surface p-3">
+            <p className="text-xs text-muted">Unplanned (from buffer)</p>
+            <p className="text-lg font-semibold tabular-nums">{inr(outside.unplanned)}</p>
+          </div>
+          <p className="col-span-2 -mt-1 text-xs text-muted">Not counted in the daily budget or card caps above.</p>
+        </section>
+      )}
+
       <section className="rounded-2xl bg-surface p-4 shadow-sm">
-        <h2 className="mb-2 text-sm font-semibold">By category</h2>
+        <h2 className="mb-2 text-sm font-semibold">By category (daily)</h2>
         {byCat.length === 0 ? (
           <p className="text-sm text-muted">No spends in this period yet.</p>
         ) : (

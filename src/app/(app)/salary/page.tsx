@@ -6,9 +6,9 @@ import { useStore } from "@/lib/store";
 import { useToast } from "@/components/toast";
 import { ok, useData } from "@/lib/use-data";
 import Link from "next/link";
-import { addDays, cycleEnd, parseYmd, sumBetween } from "@/lib/budget";
+import { addDays, cycleEnd, diffDays, parseYmd, sumBetween } from "@/lib/budget";
 import { inr } from "@/lib/money";
-import { amountOf, normalizePlan, STEP_TITLES, stepOf, type Goal, type PlanItem } from "@/lib/plan";
+import { amountOf, isAllocation, normalizePlan, STEP_TITLES, stepOf, type Goal, type PlanItem } from "@/lib/plan";
 
 export default function SalaryPage() {
   const { cycle, cards, today, reload, ready } = useStore();
@@ -31,7 +31,7 @@ export default function SalaryPage() {
     ]);
     const p = prev?.[0];
     const prevSpends = p
-      ? await sb.from("spends").select("amount, card_id, spent_on").gte("spent_on", p.starts_on).lte("spent_on", p.ends_on).then(ok)
+      ? await sb.from("spends").select("amount, card_id, spent_on, spend_type").gte("spent_on", p.starts_on).lte("spent_on", p.ends_on).then(ok)
       : [];
     return {
       items: (items as Record<string, unknown>[]).map(normalizePlan),
@@ -39,14 +39,18 @@ export default function SalaryPage() {
       loanId: (loan as { id: string }[])?.[0]?.id as string | undefined,
       prev: p as { starts_on: string; ends_on: string } | undefined,
       extraIncome: (income as { amount: number }[]).reduce((s, i) => s + Number(i.amount), 0),
-      prevSpends: (prevSpends as { amount: number; card_id: string; spent_on: string }[]).map((s) => ({ ...s, amount: Number(s.amount) })),
+      prevSpends: (prevSpends as { amount: number; card_id: string; spent_on: string; spend_type: string }[]).map((s) => ({ ...s, amount: Number(s.amount) })),
     };
   }, cycle?.id);
 
   if (!ready || !cycle || !data) return <div className="h-64 animate-pulse rounded-3xl bg-surface" />;
   const { items, goals, loanId, prev, prevSpends, extraIncome } = data;
 
-  const total = items.reduce((t, i) => t + amountOf(i), 0);
+  // Salary = this cycle's plan + the daily budget (₹/day × days in cycle).
+  const planTotal = items.filter(isAllocation).reduce((t, i) => t + amountOf(i), 0);
+  const days = diffDays(cycle.starts_on, cycleEnd(cycle.starts_on, cycle.ends_on)) + 1;
+  const dailyReserve = Number(cycle.daily_budget) * days;
+  const total = planTotal + dailyReserve;
   const salary = Number(cycle.salary);
   const diff = salary - total;
   const doneCount = items.filter((i) => i.done).length;
@@ -132,7 +136,7 @@ export default function SalaryPage() {
       {rolling && (
         <section className="space-y-3 rounded-2xl bg-surface p-4 shadow-sm">
           <p className="text-sm">
-            This closes the current cycle, starts a new one, copies the plan (with any scheduled changes) and moves your unspent daily budget to the Trip fund row.
+            This closes the current cycle, starts a new one, uses next month&apos;s plan (or copies this one) and moves your unspent daily budget to the Trip fund row.
           </p>
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs text-muted">
@@ -163,7 +167,7 @@ export default function SalaryPage() {
               : `${inr(-diff)} over your salary`}
         </p>
         <p className="text-xs opacity-80">
-          {inr(total)} planned of {inr(salary)} salary
+          Plan {inr(planTotal)} + daily budget {inr(dailyReserve)} (₹{Number(cycle.daily_budget)} × {days} days) = {inr(total)} of {inr(salary)}
         </p>
       </section>
 
@@ -183,18 +187,32 @@ export default function SalaryPage() {
             <span className="mr-2 inline-grid h-6 w-6 place-items-center rounded-full bg-navy text-xs text-white">{step}</span>
             {STEP_TITLES[step]}
           </h2>
-          {step === 1 && prev && (
-            <ul className="mb-2 mt-2 space-y-1 text-xs text-muted">
-              {cards
-                .filter((c) => c.monthly_cap > 0)
-                .map((c) => (
-                  <li key={c.id} className="flex justify-between">
-                    <span>{c.nickname}</span>
-                    <span className="tabular-nums">{inr(sumBetween(prevSpends, prev.starts_on, prev.ends_on, c.id))}</span>
-                  </li>
-                ))}
-            </ul>
-          )}
+          {step === 1 && prev && (() => {
+            const cardIds = new Set(cards.filter((c) => c.monthly_cap > 0).map((c) => c.id));
+            const onCards = prevSpends.filter((x) => cardIds.has(x.card_id));
+            const byType = (t: string) => onCards.filter((x) => (x.spend_type ?? "daily") === t).reduce((a, x) => a + x.amount, 0);
+            return (
+              <div className="mb-2 mt-2 text-xs text-muted">
+                <ul className="space-y-1">
+                  {cards
+                    .filter((c) => c.monthly_cap > 0)
+                    .map((c) => (
+                      <li key={c.id} className="flex justify-between">
+                        <span>{c.nickname}</span>
+                        <span className="tabular-nums">{inr(sumBetween(prevSpends, prev.starts_on, prev.ends_on, c.id))}</span>
+                      </li>
+                    ))}
+                </ul>
+                <p className="mt-1.5 flex justify-between border-t border-line pt-1.5 font-semibold text-ink">
+                  <span>Full card bill</span>
+                  <span className="tabular-nums">{inr(onCards.reduce((a, x) => a + x.amount, 0))}</span>
+                </p>
+                <p>
+                  Daily {inr(byType("daily"))} · Planned {inr(byType("planned"))} (paid from funds) · Unplanned {inr(byType("unplanned"))} (from buffer)
+                </p>
+              </div>
+            );
+          })()}
           <ul className="divide-y divide-line">
             {items
               .filter((i) => stepOf(i, goals) === step)

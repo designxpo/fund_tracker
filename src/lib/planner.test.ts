@@ -18,9 +18,11 @@ const base: PlannerInputs = {
   dailyBudget: 500,
   extraMonthly: 0,
   lines,
-  changes: [
-    { name: "Phone EMI", effective_from: "2026-12-01", planned: 0 },
-    { name: "Loan prepayment", effective_from: "2026-12-01", planned: 4000 },
+  templates: [
+    {
+      month: "2026-12",
+      lines: lines.map((l) => ({ ...l, planned: l.name === "Phone EMI" ? 0 : l.name === "Loan prepayment" ? 4000 : l.planned })),
+    },
   ],
   loanFreeFrom: "2028-06",
   loanLines: ["Loan EMI", "Loan prepayment"],
@@ -49,8 +51,14 @@ test("goal waits for free money, then fills in priority order", () => {
 });
 
 test("committed plan line funds its own goal", () => {
+  const phone = { name: "Phone", kind: "savings", planned: 5000, goal_id: "phone" };
   const r = simulate(
-    { ...base, lines: [...lines, { name: "Phone", kind: "savings", planned: 5000, goal_id: "phone" }], salary: 62500 },
+    {
+      ...base,
+      lines: [...lines, phone],
+      templates: base.templates.map((t) => ({ ...t, lines: [...t.lines, phone] })),
+      salary: 62500,
+    },
     [{ id: "phone", remaining: 15000, priority: 1, target_date: "2027-01-15" }],
   );
   assert.equal(r.phone.readyBy, "2027-01");
@@ -80,4 +88,10 @@ test("recurring extra income uses latest per source within 2 months", () => {
     { amount: 20000, source: "Bonus", received_on: "2026-09-20", recurring: false },
   ];
   assert.equal(recurringExtra(inc, "2026-10-03"), 9000);
+});
+
+test("templates only apply after the current cycle's month", () => {
+  // a template for the current month itself must not override the live plan
+  const inp = { ...base, templates: [{ month: "2026-10", lines: [] }, ...base.templates] };
+  assert.equal(Math.round(freeMoney("2026-11", inp)), Math.round(freeMoney("2026-11", base)));
 });

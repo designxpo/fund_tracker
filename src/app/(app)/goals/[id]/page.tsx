@@ -9,7 +9,7 @@ import { useToast } from "@/components/toast";
 import { GoalForm } from "@/components/goal-form";
 import { ok, useData } from "@/lib/use-data";
 import { loadPlanner, PRIORITY } from "@/lib/planner-data";
-import { addMonths, emiFor, freeMoney, HORIZON, simulate, ymLabel, type PlannerInputs } from "@/lib/planner";
+import { addMonths, emiFor, freeMoney, HORIZON, simulate, ymLabel, type PlanLine, type PlannerInputs } from "@/lib/planner";
 import { inr } from "@/lib/money";
 
 const DAYS_PER_MONTH = 365 / 12;
@@ -53,7 +53,7 @@ export default function GoalDetailPage() {
   const targetYm = goal.target_date?.slice(0, 7) ?? null;
   const onTrack = !!targetYm && !!res.readyBy && res.readyBy <= targetYm;
 
-  // How free money changes over time (scheduled plan changes, loan closing).
+  // How free money changes over time (upcoming months' plans, loan closing).
   const timeline: { ym: string; free: number }[] = [];
   for (let i = 0; i < HORIZON && timeline.length < 4; i++) {
     const ym = addMonths(inputs.start, i);
@@ -68,21 +68,23 @@ export default function GoalDetailPage() {
     : 2000;
   const x = extra ?? defaultExtra;
 
+  // Apply the lever to this cycle's plan and to every upcoming month's plan.
+  const sourceName = data.lines.find((l) => l.id === source)?.name;
+  const leverPlan = <T extends PlanLine>(lines: T[], amount: number): PlanLine[] => {
+    const out: PlanLine[] = lines.map((l) =>
+      sourceName && l.name === sourceName ? { ...l, planned: Math.max(0, l.planned - amount) } : { ...l },
+    );
+    out.push({ name: goal.name, kind: "savings", planned: amount, goal_id: goal.id });
+    return out;
+  };
   const withLever = (amount: number, src: string): PlannerInputs => {
     if (amount <= 0) return inputs;
-    const lines = data.lines.map((l) => ({ ...l }));
-    let changes = data.changes;
-    let dailyBudget = inputs.dailyBudget;
-    lines.push({ id: "lever", name: goal.name, kind: "savings", planned: amount, goal_id: goal.id });
-    if (src === "daily") dailyBudget = Math.max(0, dailyBudget - amount / DAYS_PER_MONTH);
-    else if (src !== "free") {
-      const line = lines.find((l) => l.id === src);
-      if (line) {
-        line.planned = Math.max(0, line.planned - amount);
-        changes = changes.map((c) => (c.name === line.name ? { ...c, planned: Math.max(0, c.planned - amount) } : c));
-      }
-    }
-    return { ...inputs, lines, changes, dailyBudget };
+    return {
+      ...inputs,
+      lines: leverPlan(data.lines, amount),
+      templates: inputs.templates.map((t) => ({ ...t, lines: leverPlan(t.lines, amount) })),
+      dailyBudget: src === "daily" ? Math.max(0, inputs.dailyBudget - amount / DAYS_PER_MONTH) : inputs.dailyBudget,
+    };
   };
   const lever = simulate(withLever(x, source), data.plannerGoals)[goal.id];
   const sooner = res.months != null && lever.months != null ? res.months - lever.months : null;
@@ -111,9 +113,17 @@ export default function GoalDetailPage() {
       } else if (source !== "free") {
         const line = data.lines.find((l) => l.id === source)!;
         ok(await sb.from("plan_items").update({ planned: Math.max(0, line.planned - x) }).eq("id", line.id));
-        for (const c of data.changes.filter((c) => c.name === line.name && c.effective_from > cycle.starts_on)) {
-          ok(await sb.from("plan_changes").update({ planned: Math.max(0, c.planned - x) }).eq("id", c.id));
-        }
+      }
+      // Upcoming months' plans get the same change, so it sticks after Salary Day.
+      const cycleMonth = cycle.starts_on.slice(0, 7);
+      const upcoming = data.templateRows.filter((t) => t.month > cycleMonth);
+      for (const month of [...new Set(upcoming.map((t) => t.month))]) {
+        const rows = upcoming.filter((t) => t.month === month);
+        const mine = rows.find((t) => t.goal_id === goal.id);
+        if (mine) ok(await sb.from("plan_templates").update({ planned: mine.planned + x }).eq("id", mine.id));
+        else ok(await sb.from("plan_templates").insert({ month: `${month}-01`, name: goal.name, kind: "savings", goal_id: goal.id, planned: x, sort_order: 50 }));
+        const src = sourceName ? rows.find((t) => t.name === sourceName) : undefined;
+        if (src) ok(await sb.from("plan_templates").update({ planned: Math.max(0, src.planned - x) }).eq("id", src.id));
       }
       setExtra(null);
     }, `${inr(x)}/month added to your plan for ${goal.name}`);

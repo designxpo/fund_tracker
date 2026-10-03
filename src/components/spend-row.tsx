@@ -9,6 +9,7 @@ export function SpendRow({
   icon,
   title,
   subtitle,
+  badge,
   amount,
   onTap,
   onDelete,
@@ -16,6 +17,8 @@ export function SpendRow({
   icon: string;
   title: string;
   subtitle: string;
+  /** e.g. "Planned · Supplements": shown for spends outside the daily budget */
+  badge?: string;
   amount: number;
   onTap: () => void;
   onDelete: () => void;
@@ -69,6 +72,7 @@ export function SpendRow({
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-bg text-xl">{icon}</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium">{title}</span>
+          {badge && <span className="mt-0.5 inline-block rounded-full bg-navy/[.08] px-2 py-0.5 text-[10px] font-semibold text-navy">{badge}</span>}
           <span className="block truncate text-xs text-muted">{subtitle}</span>
         </span>
         <span className="font-semibold tabular-nums">{inr(amount)}</span>

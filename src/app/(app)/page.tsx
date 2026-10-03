@@ -7,7 +7,7 @@ import { useToast } from "@/components/toast";
 import { CardStrip } from "@/components/card-strip";
 import { SpendRow } from "@/components/spend-row";
 import Link from "next/link";
-import { billsDueSoon, ordinal, parseYmd, salaryPromptDue } from "@/lib/budget";
+import { billsDueSoon, ordinal, parseYmd, salaryPromptDue, sinkingDueSoon } from "@/lib/budget";
 import { inr } from "@/lib/money";
 import { budgetAlerts } from "@/lib/alerts";
 
@@ -56,7 +56,7 @@ function useOnline() {
 }
 
 export default function HomePage() {
-  const { ready, summary, spends, today, cards, categories, cycle, pending, error, deleteSpend, restoreSpend } = useStore();
+  const { ready, summary, spends, today, cards, categories, cycle, goals, pending, error, deleteSpend, restoreSpend } = useStore();
   const { open } = useQuickAdd();
   const toast = useToast();
   const online = useOnline();
@@ -76,6 +76,7 @@ export default function HomePage() {
   const todays = spends.filter((s) => s.spent_on === today);
   const dateLabel = parseYmd(today).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" });
   const dues = billsDueSoon(cards, today);
+  const fundsDue = sinkingDueSoon(goals, today);
   const alerts = budgetAlerts(summary, daily, today);
   const salaryDue = salaryPromptDue(cycle.starts_on, today);
   const tone = leftToday >= 0 ? "var(--good)" : OVER;
@@ -100,6 +101,12 @@ export default function HomePage() {
           <span aria-hidden>→</span>
         </Link>
       )}
+      {fundsDue.map((f) => (
+        <Link key={f.name} href="/goals" className={`block rounded-2xl px-4 py-3 text-sm ${f.short > 0 ? "bg-warn/15 text-warn" : "bg-good/12 text-good"}`}>
+          <b>{f.name}</b> due {f.inDays === 0 ? "today" : `on ${parseYmd(f.due).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}:{" "}
+          {f.short > 0 ? `short by ${inr(f.short)}` : "fund is ready ✓"}. Log it as a Planned spend.
+        </Link>
+      ))}
       {dues.map((d) => (
         <p key={d.nickname} role="status" className="rounded-2xl bg-warn/15 px-4 py-3 text-sm text-warn">
           <b>{d.nickname}</b> bill due {d.inDays === 0 ? "today" : `on the ${ordinal(d.day)}`}: pay in full.
@@ -187,6 +194,13 @@ export default function HomePage() {
                   key={s.id}
                   icon={cat?.icon ?? "•"}
                   title={cat?.name ?? "Uncategorised"}
+                  badge={
+                    s.spend_type === "planned"
+                      ? `Planned · ${goals.find((g) => g.id === s.goal_id)?.name ?? "fund"}`
+                      : s.spend_type === "unplanned"
+                        ? "Unplanned · buffer"
+                        : undefined
+                  }
                   subtitle={[card?.nickname, s.note].filter(Boolean).join(" · ")}
                   amount={s.amount}
                   onTap={() => open(s)}

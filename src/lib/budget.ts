@@ -32,7 +32,10 @@ export function cycleEnd(startsOn: string, endsOn: string | null): string {
   return addDays(ymd(new Date(y, m, Math.min(d, dim))), -1);
 }
 
-type SpendLike = { amount: number; spent_on: string; card_id?: string | null };
+type SpendLike = { amount: number; spent_on: string; card_id?: string | null; spend_type?: string };
+
+/** Only "daily" spends count toward the daily/weekly/cycle budget and card caps. */
+export const dailyOnly = <T extends SpendLike>(spends: T[]) => spends.filter((s) => (s.spend_type ?? "daily") === "daily");
 
 export const sumBetween = (spends: SpendLike[], from: string, to: string, cardId?: string) =>
   spends.reduce(
@@ -55,6 +58,7 @@ export function summarize(
   cycle: { starts_on: string; ends_on: string | null; daily_budget: number },
   today: string,
 ): Summary {
+  spends = dailyOnly(spends);
   const daily = Number(cycle.daily_budget);
   const start = cycle.starts_on;
   const end = cycleEnd(start, cycle.ends_on);
@@ -155,3 +159,22 @@ export function salaryPromptDue(cycleStart: string, today: string): boolean {
   const day = Number(today.slice(8, 10));
   return day >= 1 && day <= 3 && cycleStart.slice(0, 7) < today.slice(0, 7);
 }
+
+/** Sinking funds due within `within` days (today included), with whether the balance covers the bulk buy. */
+export function sinkingDueSoon(
+  funds: { name: string; kind: string; next_due_date: string | null; balance: number; target: number | null; monthly_contribution: number | null; cycle_months: number | null }[],
+  today: string,
+  within = 5,
+) {
+  return funds
+    .filter((f) => f.kind === "sinking" && f.next_due_date)
+    .map((f) => {
+      const need = sinkingTarget(f);
+      return { name: f.name, due: f.next_due_date!, inDays: diffDays(today, f.next_due_date!), short: Math.max(0, need - f.balance) };
+    })
+    .filter((f) => f.inDays >= 0 && f.inDays <= within);
+}
+
+/** What a sinking fund must hold by its due date: explicit target, else monthly × cycle. */
+export const sinkingTarget = (f: { target: number | null; monthly_contribution: number | null; cycle_months: number | null }) =>
+  f.target ?? (f.monthly_contribution ?? 0) * (f.cycle_months ?? 1);

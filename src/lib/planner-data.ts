@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { addDays, cycleEnd } from "@/lib/budget";
 import { project } from "@/lib/loan";
-import { addMonths, recurringExtra, simulate, type PlanChange, type PlanLine, type PlannerInputs } from "@/lib/planner";
+import { addMonths, recurringExtra, simulate, type PlanLine, type PlannerInputs, type PlanTemplate } from "@/lib/planner";
 import { ok } from "@/lib/use-data";
 import type { Cycle } from "@/lib/types";
 
@@ -17,17 +17,18 @@ export type GoalRow = {
   balance: number;
 };
 
+export type TemplateRow = PlanLine & { id: string; month: string };
 export type IncomeRow = { id: string; amount: number; source: string; received_on: string; recurring: boolean; note: string | null };
 export type PlanItemRow = PlanLine & { id: string };
 export type Split = { goal_id: string; pct: number }[];
 
 /** Everything the planner screens need, plus a ready-made `inputs` for `simulate`. */
 export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: string) {
-  const [goals, txs, items, changes, loans, income, settings] = await Promise.all([
+  const [goals, txs, items, tplRows, loans, income, settings] = await Promise.all([
     sb.from("goals").select("*").then(ok),
     sb.from("goal_transactions").select("goal_id, amount").then(ok),
     sb.from("plan_items").select("id, name, kind, planned, goal_id").eq("cycle_id", cycle.id).then(ok),
-    sb.from("plan_changes").select("id, name, effective_from, planned").then(ok),
+    sb.from("plan_templates").select("id, month, name, kind, goal_id, planned, sort_order").order("month").order("sort_order").then(ok),
     sb.from("loan").select("*").limit(1).then(ok),
     sb.from("income").select("*").order("received_on", { ascending: false }).limit(200).then(ok),
     sb.from("settings").select("income_split").maybeSingle().then(ok),
@@ -55,7 +56,19 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
     planned: Number(i.planned),
     goal_id: (i.goal_id as string) ?? null,
   }));
-  const changeRows = (changes as (PlanChange & { id: string })[]).map((c) => ({ ...c, planned: Number(c.planned) }));
+  // Month-specific plans, grouped by month ("YYYY-MM").
+  const templateRows: TemplateRow[] = (tplRows as Record<string, unknown>[]).map((t) => ({
+    id: t.id as string,
+    month: String(t.month).slice(0, 7),
+    name: t.name as string,
+    kind: t.kind as string,
+    goal_id: (t.goal_id as string) ?? null,
+    planned: Number(t.planned),
+  }));
+  const templates: PlanTemplate[] = [...new Set(templateRows.map((t) => t.month))].map((month) => ({
+    month,
+    lines: templateRows.filter((t) => t.month === month),
+  }));
   const incomeRows: IncomeRow[] = (income as IncomeRow[]).map((i) => ({ ...i, amount: Number(i.amount) }));
 
   // Projection starts at the next salary.
@@ -76,7 +89,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
     const prepay = Math.max(
       0,
       ...prepayLines.map((l) => l.planned),
-      ...changeRows.filter((c) => prepayLines.some((l) => l.name === c.name)).map((c) => c.planned),
+      ...templateRows.filter((t) => t.kind === "prepayment").map((t) => t.planned),
     );
     const p = P > 0 && rate != null ? project(P, rate, Number(loan.emi), prepay) : null;
     loanFreeFrom = p?.feasible
@@ -95,7 +108,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
     dailyBudget: Number(cycle.daily_budget),
     extraMonthly,
     lines,
-    changes: changeRows,
+    templates,
     loanFreeFrom,
     loanLines,
   };
@@ -110,7 +123,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
     plannerGoals,
     results: simulate(inputs, plannerGoals),
     lines,
-    changes: changeRows,
+    templateRows,
     income: incomeRows,
     extraMonthly,
     split: ((settings as { income_split: Split | null } | null)?.income_split ?? null) as Split | null,

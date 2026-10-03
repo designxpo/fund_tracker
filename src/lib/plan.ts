@@ -9,22 +9,26 @@ export type PlanItem = {
   done: boolean;
 };
 
-export type Goal = { id: string; name: string; target: number | null; opening_balance: number };
+export type Goal = { id: string; name: string; target: number | null; opening_balance: number; kind?: "savings" | "sinking" | "buffer" };
 
 export const amountOf = (i: Pick<PlanItem, "planned" | "actual">) => Number(i.actual ?? i.planned);
 
-/** Salary-day checklist step (1-9) from the spec. */
+/** Plan items that are real allocations of salary (the bills row and unspent row are bookkeeping). */
+export const isAllocation = (i: Pick<PlanItem, "kind">) => i.kind !== "bills" && i.kind !== "unspent";
+
+/** Salary-day checklist step (1-10). */
 export function stepOf(i: PlanItem, goals: Goal[]): number {
   switch (i.kind) {
     case "bills": return 1;
     case "loan": return 2;
     case "fixed": return 3;
-    case "buffer": return 4;
-    case "prepayment": return 8;
-    case "unspent": return 9;
+    case "buffer": return 5;
+    case "prepayment": return 9;
+    case "unspent": return 10;
     case "savings": {
-      const g = goals.find((x) => x.id === i.goal_id)?.name;
-      return g === "Emergency fund" ? 5 : g === "Trip fund" ? 6 : 7;
+      const g = goals.find((x) => x.id === i.goal_id);
+      if (g?.kind === "sinking") return 4;
+      return g?.name === "Emergency fund" ? 6 : g?.name === "Trip fund" ? 7 : 8;
     }
   }
 }
@@ -33,12 +37,13 @@ export const STEP_TITLES: Record<number, string> = {
   1: "Pay last cycle's card bills in full",
   2: "Keep EMIs in account",
   3: "Fixed costs",
-  4: "Surprise buffer → separate account",
-  5: "Emergency fund",
-  6: "Trip fund",
-  7: "Long-term investing",
-  8: "Loan prepayment",
-  9: "Move unspent daily budget → Trip fund",
+  4: "Sinking funds",
+  5: "Surprise buffer → separate account",
+  6: "Emergency fund",
+  7: "Trip fund",
+  8: "Long-term investing",
+  9: "Loan prepayment",
+  10: "Move unspent daily budget → Trip fund",
 };
 
 export const normalizePlan = (r: Record<string, unknown>): PlanItem =>

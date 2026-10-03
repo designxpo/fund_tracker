@@ -32,20 +32,18 @@ export default function LoanPage() {
   const sb = createClient();
 
   const { data, reload } = useData(async () => {
-    const [loan, pre, items, changes] = await Promise.all([
+    const [loan, pre, items, templates] = await Promise.all([
       sb.from("loan").select("*").limit(1).then(ok),
       sb.from("loan_prepayments").select("*").order("paid_on", { ascending: false }).then(ok),
       sb.from("plan_items").select("name, planned, cycles!inner(ends_on)").eq("kind", "prepayment").is("cycles.ends_on", null).then(ok),
-      sb.from("plan_changes").select("name, planned, effective_from").order("effective_from", { ascending: false }).then(ok),
+      sb.from("plan_templates").select("planned").eq("kind", "prepayment").then(ok),
     ]);
     const l = (loan as Record<string, unknown>[])[0];
-    // Monthly prepayment: this cycle's plan, or a higher scheduled one.
-    const prepayItems = items as { name: string; planned: number }[];
-    const names = new Set(prepayItems.map((i) => i.name));
+    // Monthly prepayment: this cycle's plan, or a higher one in an upcoming month's plan.
     const planned = Math.max(
       0,
-      ...prepayItems.map((i) => Number(i.planned)),
-      ...(changes as { name: string; planned: number }[]).filter((c) => names.has(c.name)).map((c) => Number(c.planned)),
+      ...(items as { planned: number }[]).map((i) => Number(i.planned)),
+      ...(templates as { planned: number }[]).map((t) => Number(t.planned)),
     );
     return {
       loan: {

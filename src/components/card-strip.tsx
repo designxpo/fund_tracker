@@ -8,12 +8,12 @@ const BAR = { ok: "bg-good", amber: "bg-warn", red: "bg-bad" } as const;
 const TEXT = { ok: "text-muted", amber: "text-warn", red: "text-bad" } as const;
 
 export function CardStrip() {
-  const { cards, spends, summary } = useStore();
+  const { cards, dailySpends, summary } = useStore();
   if (!summary) return null;
   return (
     <section aria-label="Cards" className="grid grid-cols-2 gap-3">
       {cards.map((c) => {
-        const spent = sumBetween(spends, summary.cycle.start, summary.cycle.end, c.id);
+        const spent = sumBetween(dailySpends, summary.cycle.start, summary.cycle.end, c.id);
         const level = capLevel(spent, c.monthly_cap);
         const pct = c.monthly_cap > 0 ? Math.min(100, (spent / c.monthly_cap) * 100) : 0;
         return (
