@@ -157,24 +157,24 @@ export default function LoanPage() {
         <p className="rounded-2xl bg-surface p-5 text-sm text-muted">Enter your outstanding principal and interest rate to see projections.</p>
       ) : (
         <>
-          <section className="rounded-2xl bg-gradient-to-br from-navy to-navy-2 p-4 text-white shadow-sm">
-            <p className="text-sm text-white/70">Outstanding</p>
-            <p className="text-3xl font-bold tabular-nums text-mint">{inr(P)}</p>
+          <section className="glass-hero rounded-3xl p-4">
+            <p className="text-sm text-muted">Outstanding</p>
+            <p className="text-3xl font-bold tabular-nums text-ink">{inr(P)}</p>
             <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
               <div>
-                <dt className="text-white/60">Original close</dt>
+                <dt className="text-muted">Original close</dt>
                 <dd className="font-semibold">{loan.original_end ? monthYear(loan.original_end) : "—"}</dd>
               </div>
               <div>
-                <dt className="text-white/60">Projected close</dt>
-                <dd className="font-semibold text-mint">{closeLabel(planned > 0 ? plan : base)}</dd>
+                <dt className="text-muted">Projected close</dt>
+                <dd className="font-semibold text-good">{closeLabel(planned > 0 ? plan : base)}</dd>
               </div>
               <div>
-                <dt className="text-white/60">Interest saved so far (approx.)</dt>
+                <dt className="text-muted">Interest saved so far (approx.)</dt>
                 <dd className="font-semibold">{inr(Math.round(savedSoFar))}</dd>
               </div>
               <div>
-                <dt className="text-white/60">Projected saving{planned > 0 ? ` (+${inr(planned)}/mo)` : ""}</dt>
+                <dt className="text-muted">Projected saving{planned > 0 ? ` (+${inr(planned)}/mo)` : ""}</dt>
                 <dd className="font-semibold">{base.feasible && plan.feasible ? inr(Math.round(base.interest - plan.interest)) : "—"}</dd>
               </div>
             </dl>

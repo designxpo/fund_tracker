@@ -11,7 +11,7 @@ import { billsDueSoon, ordinal, parseYmd, salaryPromptDue } from "@/lib/budget";
 import { inr } from "@/lib/money";
 import { budgetAlerts } from "@/lib/alerts";
 
-const OVER = "#ff7a7e";
+const OVER = "var(--bad)";
 
 function Ring({ spent, budget }: { spent: number; budget: number }) {
   const r = 34;
@@ -78,7 +78,7 @@ export default function HomePage() {
   const dues = billsDueSoon(cards, today);
   const alerts = budgetAlerts(summary, daily, today);
   const salaryDue = salaryPromptDue(cycle.starts_on, today);
-  const tone = leftToday >= 0 ? "var(--mint)" : OVER;
+  const tone = leftToday >= 0 ? "var(--good)" : OVER;
 
   return (
     <div className="space-y-4">
@@ -95,7 +95,7 @@ export default function HomePage() {
       </header>
 
       {salaryDue && (
-        <Link href="/salary" className="flex items-center justify-between rounded-2xl bg-mint/25 px-4 py-3 text-sm font-medium">
+        <Link href="/salary" className="flex items-center justify-between rounded-2xl bg-mint/30 px-4 py-3 text-sm font-semibold text-navy">
           <span>Salary day: start your new cycle</span>
           <span aria-hidden>→</span>
         </Link>
@@ -121,23 +121,23 @@ export default function HomePage() {
         </ul>
       )}
 
-      <section className="rounded-3xl bg-gradient-to-br from-navy to-navy-2 p-5 text-white shadow-lg">
-        <p className="text-sm text-white/70">Left today</p>
+      <section className="glass-hero rounded-[28px] p-5">
+        <p className="text-sm text-muted">Left today</p>
         <p className="mt-1 text-5xl font-bold tabular-nums tracking-tight" style={{ color: tone }} aria-live="polite">
           {inr(leftToday)}
         </p>
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/15">
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink/10">
           <div
             className="h-full rounded-full transition-[width] duration-300"
             style={{ width: `${Math.min(100, (todaySpent / daily) * 100)}%`, background: tone }}
           />
         </div>
-        <div className="mt-3 flex justify-between text-sm text-white/75">
+        <div className="mt-3 flex justify-between text-sm text-muted">
           <span>
             Spent {inr(todaySpent)} of {inr(daily)}
           </span>
           <span>
-            Week left <b style={{ color: week.left < 0 ? OVER : "#fff" }}>{inr(week.left)}</b>
+            Week left <b style={{ color: week.left < 0 ? OVER : "var(--ink)" }}>{inr(week.left)}</b>
           </span>
         </div>
       </section>

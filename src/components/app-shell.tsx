@@ -12,7 +12,7 @@ function Fab() {
     <button
       aria-label="Add spend"
       onClick={() => open()}
-      className="fixed bottom-[calc(env(safe-area-inset-bottom)+80px)] right-[max(20px,calc(50%-14rem+20px))] z-40 grid h-16 w-16 place-items-center rounded-full bg-mint text-navy shadow-[0_8px_24px_rgba(79,224,173,.45)] transition active:scale-90"
+      className="fixed bottom-[calc(max(12px,env(safe-area-inset-bottom))+84px)] right-[max(20px,calc(50%-14rem+20px))] z-40 grid h-16 w-16 place-items-center rounded-full bg-navy text-white shadow-[0_1px_0_rgba(255,255,255,.25)_inset,0_12px_28px_-6px_rgba(20,38,79,.55)] outline outline-1 -outline-offset-1 outline-white/20 transition active:scale-90"
     >
       <PlusIcon />
     </button>

@@ -197,24 +197,24 @@ export default function GoalDetailPage() {
         </button>
       </div>
 
-      <section className="rounded-3xl bg-gradient-to-br from-navy to-navy-2 p-5 text-white shadow-lg">
-        <p className="text-sm text-white/70">{fundedNow ? "You can afford it" : "You can buy it by"}</p>
-        <p className="mt-1 text-4xl font-bold tracking-tight text-mint">
+      <section className="glass-hero rounded-[28px] p-5">
+        <p className="text-sm text-muted">{fundedNow ? "You can afford it" : "You can buy it by"}</p>
+        <p className="mt-1 text-4xl font-bold tracking-tight text-good">
           {fundedNow ? "Now 🎉" : res.readyBy ? ymLabel(res.readyBy) : "Not in sight"}
         </p>
-        {!fundedNow && res.months != null && <p className="text-sm text-white/70">{res.months} salary {res.months === 1 ? "day" : "days"} from now</p>}
-        {!res.readyBy && <p className="mt-1 text-sm text-white/70">Your current plan leaves no free money for it. Use a lever below.</p>}
+        {!fundedNow && res.months != null && <p className="text-sm text-muted">{res.months} salary {res.months === 1 ? "day" : "days"} from now</p>}
+        {!res.readyBy && <p className="mt-1 text-sm text-muted">Your current plan leaves no free money for it. Use a lever below.</p>}
 
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/15">
-          <div className="h-full rounded-full bg-mint" style={{ width: `${pct}%` }} />
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink/10">
+          <div className="h-full rounded-full bg-good" style={{ width: `${pct}%` }} />
         </div>
-        <div className="mt-2 flex justify-between text-sm text-white/75">
+        <div className="mt-2 flex justify-between text-sm text-muted">
           <span>Saved {inr(goal.balance)}</span>
           <span>of {inr(target)}</span>
         </div>
 
         {targetYm && (
-          <p className={`mt-3 rounded-xl px-3 py-2 text-sm ${onTrack ? "bg-mint/20 text-mint" : "bg-[#ff7a7e]/20 text-[#ffb3b5]"}`}>
+          <p className={`mt-3 rounded-xl px-3 py-2 text-sm ${onTrack ? "bg-good/15 text-good" : "bg-bad/12 text-bad"}`}>
             {onTrack
               ? `On track for ${ymLabel(targetYm)} ✓`
               : res.needPerMonth === Infinity

@@ -22,7 +22,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         <div
           key={t.n}
           role="status"
-          className="toast-in fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+88px)] z-[60] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl bg-navy px-4 py-3 text-sm text-white shadow-xl"
+          className="toast-in fixed inset-x-4 bottom-[calc(max(12px,env(safe-area-inset-bottom))+92px)] z-[60] mx-auto flex max-w-md items-center justify-between gap-3 rounded-[22px] bg-[rgba(15,23,48,.82)] px-4 py-3 text-sm font-medium text-white shadow-[0_12px_32px_-8px_rgba(15,23,48,.45)] backdrop-blur-xl backdrop-saturate-150"
         >
           <span>{t.msg}</span>
           {t.action && (

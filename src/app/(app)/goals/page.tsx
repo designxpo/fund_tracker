@@ -157,13 +157,13 @@ export default function GoalsPage() {
 
       <h2 className="text-sm font-semibold">Savings</h2>
 
-      <section className="rounded-2xl bg-gradient-to-br from-navy to-navy-2 p-4 text-white shadow-sm">
-        <p className="text-sm text-white/70">Saved in the last 2 months</p>
-        <p className="text-3xl font-bold tabular-nums text-mint">{inr(last2m)}</p>
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/15">
-          <div className="h-full rounded-full bg-mint" style={{ width: `${Math.max(0, Math.min(100, (last2m / SAVINGS_2M_TARGET) * 100))}%` }} />
+      <section className="glass-hero rounded-3xl p-4">
+        <p className="text-sm text-muted">Saved in the last 2 months</p>
+        <p className="text-3xl font-bold tabular-nums text-good">{inr(last2m)}</p>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-ink/10">
+          <div className="h-full rounded-full bg-good" style={{ width: `${Math.max(0, Math.min(100, (last2m / SAVINGS_2M_TARGET) * 100))}%` }} />
         </div>
-        <p className="mt-1 text-xs text-white/70">Target {inr(SAVINGS_2M_TARGET)} every 2 months</p>
+        <p className="mt-1 text-xs text-muted">Target {inr(SAVINGS_2M_TARGET)} every 2 months</p>
       </section>
 
       {sorted.map((g) => {

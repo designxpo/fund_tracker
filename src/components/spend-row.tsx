@@ -45,7 +45,7 @@ export function SpendRow({
   };
 
   return (
-    <li className="relative overflow-hidden rounded-2xl bg-bad">
+    <li className="relative overflow-hidden rounded-2xl bg-bad shadow-[0_6px_18px_-12px_rgba(20,38,79,.3)]">
       <button
         onClick={onDelete}
         tabIndex={dx === 0 ? -1 : 0}
@@ -64,7 +64,7 @@ export function SpendRow({
           else onTap();
         }}
         style={{ transform: `translateX(${dx}px)`, transition: dragging ? "none" : "transform .2s ease-out", touchAction: "pan-y" }}
-        className="relative flex min-h-16 cursor-pointer items-center gap-3 bg-surface px-3 py-2"
+        className="relative flex min-h-16 cursor-pointer items-center gap-3 bg-surface-solid px-3 py-2"
       >
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-bg text-xl">{icon}</span>
         <span className="min-w-0 flex-1">

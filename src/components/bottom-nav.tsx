@@ -12,11 +12,12 @@ const TABS = [
   { href: "/more", label: "More", Icon: MoreIcon },
 ];
 
+/** Floating glass capsule tab bar; content scrolls underneath it. */
 export function BottomNav() {
   const path = usePathname();
   return (
-    <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 backdrop-blur">
-      <ul className="mx-auto flex max-w-md">
+    <nav className="fixed inset-x-0 bottom-[max(12px,env(safe-area-inset-bottom))] z-40 px-4">
+      <ul className="glass-chrome mx-auto flex max-w-md rounded-[30px] p-1.5">
         {TABS.map(({ href, label, Icon }) => {
           const active = href === "/" ? path === "/" : path.startsWith(href);
           return (
@@ -24,11 +25,11 @@ export function BottomNav() {
               <Link
                 href={href}
                 aria-current={active ? "page" : undefined}
-                className={`flex h-16 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${active ? "text-ink" : "text-muted"}`}
+                className={`flex h-14 flex-col items-center justify-center gap-0.5 rounded-[24px] text-[10.5px] font-semibold tracking-wide transition-colors duration-200 active:scale-95 ${
+                  active ? "bg-white/90 text-navy shadow-[0_2px_10px_-2px_rgba(20,38,79,.18)]" : "text-muted"
+                }`}
               >
-                <span className={`grid h-7 w-12 place-items-center rounded-full transition ${active ? "bg-mint/30" : ""}`}>
-                  <Icon />
-                </span>
+                <Icon />
                 {label}
               </Link>
             </li>

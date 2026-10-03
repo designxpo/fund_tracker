@@ -180,12 +180,12 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
           aria-label="Close"
           tabIndex={-1}
           onClick={close}
-          className={`absolute inset-0 bg-black/40 transition-opacity duration-200 ${isOpen ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-0 bg-[rgba(15,23,48,.22)] transition-opacity duration-200 ${isOpen ? "opacity-100" : "opacity-0"}`}
         />
         <div
           role="dialog"
           aria-label={editing ? "Edit spend" : "Add spend"}
-          className="absolute inset-x-0 mx-auto flex max-w-md flex-col rounded-t-3xl bg-surface shadow-2xl transition-transform duration-200 ease-out"
+          className="glass-chrome absolute inset-x-0 mx-auto flex max-w-md flex-col rounded-t-[32px] transition-transform duration-300 ease-[cubic-bezier(.2,.9,.25,1)]"
           style={{
             bottom: inset,
             transform: isOpen ? "none" : "translateY(100%)",
@@ -193,7 +193,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
           }}
         >
           <div className="overflow-y-auto px-5 pt-3">
-            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" />
+            <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-ink/15" />
 
             <label className="flex items-baseline gap-1 border-b border-line pb-2">
               <span className="text-3xl font-semibold text-muted">₹</span>
@@ -303,7 +303,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
               <button
                 onClick={save}
                 disabled={!canSave}
-                className="h-14 w-full rounded-2xl bg-navy text-lg font-semibold text-white transition active:scale-[.98] disabled:opacity-40"
+                className="h-14 w-full rounded-full bg-navy text-lg font-semibold text-white shadow-[0_10px_24px_-10px_rgba(20,38,79,.6)] transition active:scale-[.98] disabled:opacity-40"
               >
                 {editing ? "Update" : "Save"}
               </button>
@@ -336,10 +336,10 @@ function Chip({
       aria-pressed={active}
       className={`flex h-11 items-center rounded-full border px-4 text-[15px] transition active:scale-95 ${
         active
-          ? "border-navy bg-navy text-white"
+          ? "border-navy bg-navy text-white shadow-[0_6px_16px_-8px_rgba(20,38,79,.7)]"
           : muted
             ? "border-transparent text-muted"
-            : "border-line bg-bg text-ink"
+            : "border-white/80 bg-white/60 text-ink"
       }`}
     >
       {children}

@@ -49,14 +49,14 @@ export default function InsightsPage() {
     <div className="space-y-4 pt-2">
       <h1 className="text-2xl font-bold">Insights</h1>
 
-      <div role="tablist" className="grid grid-cols-2 rounded-2xl bg-surface p-1 shadow-sm">
+      <div role="tablist" className="grid grid-cols-2 rounded-full bg-surface p-1">
         {(["week", "cycle"] as const).map((m) => (
           <button
             key={m}
             role="tab"
             aria-selected={mode === m}
             onClick={() => setMode(m)}
-            className={`h-11 rounded-xl text-sm font-medium transition ${mode === m ? "bg-navy text-white" : "text-muted"}`}
+            className={`h-10 rounded-full text-sm font-semibold transition ${mode === m ? "bg-white text-ink shadow-[0_2px_10px_-2px_rgba(20,38,79,.2)]" : "text-muted"}`}
           >
             {m === "week" ? "Week" : "Salary cycle"}
           </button>
@@ -84,7 +84,7 @@ export default function InsightsPage() {
                 cursor={{ fill: "var(--line)", opacity: 0.5 }}
                 formatter={(v) => [inr(Number(v)), "Spent"]}
                 labelFormatter={(_, p) => p?.[0]?.payload?.date ?? ""}
-                contentStyle={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, color: "var(--ink)" }}
+                contentStyle={{ background: "rgba(255,255,255,.92)", border: "1px solid rgba(255,255,255,.9)", borderRadius: 14, color: "var(--ink)", boxShadow: "0 10px 30px -12px rgba(20,38,79,.3)", backdropFilter: "blur(20px)" }}
               />
               <ReferenceLine y={daily} stroke="var(--warn)" strokeDasharray="4 4" label={{ value: inr(daily), position: "insideTopRight", fontSize: 10, fill: "var(--warn)" }} />
               <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
@@ -157,10 +157,10 @@ export default function InsightsPage() {
         {mode === "week" && <p className="mt-3 text-xs text-muted">Caps are monthly; switch to Salary cycle for the full picture.</p>}
       </section>
 
-      <section className="rounded-2xl bg-gradient-to-br from-navy to-navy-2 p-4 text-white shadow-sm">
-        <p className="text-sm text-white/70">Unspent this cycle (projected)</p>
-        <p className="text-3xl font-bold tabular-nums text-mint">{inr(unspent)}</p>
-        <p className="mt-1 text-sm text-white/70">Will go to Trip fund on salary day, if you stay on budget.</p>
+      <section className="glass-hero rounded-3xl p-4">
+        <p className="text-sm text-muted">Unspent this cycle (projected)</p>
+        <p className="text-3xl font-bold tabular-nums text-good">{inr(unspent)}</p>
+        <p className="mt-1 text-sm text-muted">Will go to Trip fund on salary day, if you stay on budget.</p>
       </section>
     </div>
   );

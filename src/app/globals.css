@@ -1,37 +1,31 @@
 @import "tailwindcss";
 
+/* Light-only "Liquid Glass" theme: frosted translucent surfaces floating over a soft colour wash. */
 :root {
-  --bg: #eef3fb;
-  --surface: #ffffff;
-  --ink: #0f1b3d;
-  --muted: #6b7691;
-  --line: #e3e9f4;
+  color-scheme: light;
+  --page: #eef3fb;                          /* fallback under the wash */
+  --surface: rgba(255, 255, 255, 0.56);     /* glass cards */
+  --surface-solid: #ffffff;                 /* where content slides over colour (swipe rows) */
+  --bg: rgba(255, 255, 255, 0.62);          /* fills inside glass: inputs, chips, icon wells */
+  --ink: #0b1530;
+  --muted: #5b6680;
+  --line: rgba(15, 27, 61, 0.09);
   --navy: #14264f;
   --navy-2: #1d3470;
   --mint: #4fe0ad;
-  --good: #12a37a;
-  --warn: #e8960b;
-  --bad: #e5484d;
-}
+  --good: #0f9a71;
+  --warn: #c77700;
+  --bad: #e0393f;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #080d1c;
-    --surface: #111a33;
-    --ink: #eaf0ff;
-    --muted: #8d9abb;
-    --line: #1f2b4b;
-    --navy: #17254d;
-    --navy-2: #22377a;
-    --good: #3ddc9e;
-    --warn: #f5b042;
-    --bad: #ff6b70;
-  }
+  --glass-blur: blur(24px) saturate(180%);
+  --glass-edge: rgba(255, 255, 255, 0.75);  /* bright rim = light catching the material */
+  --glass-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 10px 30px -12px rgba(20, 38, 79, 0.18);
 }
 
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
+  --color-surface-solid: var(--surface-solid);
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-line: var(--line);
@@ -41,24 +35,83 @@
   --color-good: var(--good);
   --color-warn: var(--warn);
   --color-bad: var(--bad);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif;
 }
 
-html {
-  background: var(--bg);
-  -webkit-tap-highlight-color: transparent;
+@layer base {
+  html {
+    background: var(--page);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background: transparent;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    overscroll-behavior-y: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The colour wash the glass refracts. Fixed layer (iOS ignores background-attachment: fixed). */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(60% 45% at 8% 0%, #c9f3e3 0%, transparent 70%),
+      radial-gradient(55% 40% at 100% 12%, #d6e2ff 0%, transparent 70%),
+      radial-gradient(70% 45% at 85% 95%, #ece0ff 0%, transparent 70%),
+      radial-gradient(60% 40% at 0% 80%, #fde7d6 0%, transparent 70%),
+      var(--page);
+  }
+
+  button {
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: transform 100ms ease-out;
+  }
+  /* Instant press feedback on touch-down. Utilities (e.g. active:scale-90) still override. */
+  button:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  /* Large numbers want tighter tracking. */
+  .text-5xl, .text-4xl, .text-3xl {
+    letter-spacing: -0.025em;
+  }
 }
 
-body {
-  background: var(--bg);
+/* Every card is glass: translucent fill + blur + bright rim + soft depth. */
+.bg-surface {
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+  outline: 1px solid var(--glass-edge);
+  outline-offset: -1px;
+}
+
+/* Hero cards: thicker, tinted glass. */
+.glass-hero {
+  background:
+    linear-gradient(135deg, rgba(79, 224, 173, 0.28), rgba(91, 141, 239, 0.16) 60%, rgba(167, 139, 250, 0.14)),
+    rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  backdrop-filter: blur(30px) saturate(190%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 18px 40px -16px rgba(20, 38, 79, 0.25);
+  outline: 1px solid rgba(255, 255, 255, 0.8);
+  outline-offset: -1px;
   color: var(--ink);
-  font-family: var(--font-sans), system-ui, sans-serif;
-  overscroll-behavior-y: none;
 }
 
-button {
-  cursor: pointer;
-  touch-action: manipulation;
+/* Floating chrome (tab bar, sheet): the most opaque glass so controls stay legible over anything. */
+.glass-chrome {
+  background: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  backdrop-filter: blur(28px) saturate(200%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 12px 36px -10px rgba(20, 38, 79, 0.28);
+  outline: 1px solid rgba(255, 255, 255, 0.85);
+  outline-offset: -1px;
 }
 
 .pb-safe {
@@ -66,11 +119,21 @@ button {
 }
 
 @keyframes toast-in {
-  from { transform: translateY(12px); opacity: 0; }
-  to { transform: none; opacity: 1; }
+  from { transform: translateY(12px) scale(0.98); opacity: 0; filter: blur(6px); }
+  to { transform: none; opacity: 1; filter: none; }
 }
-.toast-in { animation: toast-in .18s ease-out; }
+.toast-in { animation: toast-in 0.22s ease-out; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0s !important; animation-duration: 0s !important; }
+}
+
+/* Accessibility fallbacks: solid surfaces when transparency is reduced or contrast is raised. */
+@media (prefers-reduced-transparency: reduce) {
+  .bg-surface, .glass-hero, .glass-chrome { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  body::before { background: var(--page); }
+}
+@media (prefers-contrast: more) {
+  :root { --muted: #3a445c; --line: rgba(15, 27, 61, 0.25); }
+  .bg-surface, .glass-hero, .glass-chrome { background: #fff; outline-color: rgba(15, 27, 61, 0.35); }
 }
