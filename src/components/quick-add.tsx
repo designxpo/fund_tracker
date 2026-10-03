@@ -6,6 +6,7 @@ import { useStore } from "@/lib/store";
 import { useToast } from "@/components/toast";
 import { cycleEnd, isBirthdayWindow, sumBetween, summarize, suggestCardId } from "@/lib/budget";
 import { inr } from "@/lib/money";
+import { spendImpact } from "@/lib/alerts";
 import type { Spend } from "@/lib/types";
 
 type QA = { open: (editing?: Spend) => void };
@@ -102,6 +103,14 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const visibleCats = allCats ? sortedCats : sortedCats.slice(0, 6);
 
   const canSave = amt > 0 && !!categoryId;
+
+  // Live preview: what would this spend do to today / this week / this cycle?
+  const impact = useMemo(() => {
+    if (!cycle || !(amt > 0) || !isOpen) return null;
+    const others = spends.filter((s) => s.id !== editing?.id);
+    const draft = { amount: amt, spent_on: date || today, card_id: null };
+    return spendImpact(summarize(others, cycle, today), summarize([...others, draft], cycle, today));
+  }, [cycle, amt, isOpen, spends, editing?.id, date, today]);
 
   // Would this spend push the chosen card past its monthly cap?
   const cardSpentBefore =
@@ -200,6 +209,12 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
                 className="w-full bg-transparent text-4xl font-bold tabular-nums outline-none placeholder:text-line"
               />
             </label>
+            {impact && (
+              <p role={impact.level === "over" ? "alert" : undefined} className={`mt-1.5 text-sm ${impact.level === "over" ? "font-medium text-bad" : "text-muted"}`}>
+                {impact.level === "over" ? "⛔ " : ""}
+                {impact.text}
+              </p>
+            )}
 
             <Chips>
               {visibleCats.map((c) => (

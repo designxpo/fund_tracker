@@ -9,6 +9,7 @@ import { SpendRow } from "@/components/spend-row";
 import Link from "next/link";
 import { billsDueSoon, ordinal, parseYmd, salaryPromptDue } from "@/lib/budget";
 import { inr } from "@/lib/money";
+import { budgetAlerts } from "@/lib/alerts";
 
 const OVER = "#ff7a7e";
 
@@ -75,6 +76,7 @@ export default function HomePage() {
   const todays = spends.filter((s) => s.spent_on === today);
   const dateLabel = parseYmd(today).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" });
   const dues = billsDueSoon(cards, today);
+  const alerts = budgetAlerts(summary, daily, today);
   const salaryDue = salaryPromptDue(cycle.starts_on, today);
   const tone = leftToday >= 0 ? "var(--mint)" : OVER;
 
@@ -103,6 +105,21 @@ export default function HomePage() {
           <b>{d.nickname}</b> bill due {d.inDays === 0 ? "today" : `on the ${ordinal(d.day)}`}: pay in full.
         </p>
       ))}
+
+      {alerts.length > 0 && (
+        <ul aria-label="Budget alerts" className="space-y-2">
+          {alerts.map((a) => (
+            <li
+              key={a.scope}
+              role={a.level === "over" ? "alert" : "status"}
+              className={`flex gap-2 rounded-2xl px-4 py-3 text-sm ${a.level === "over" ? "bg-bad/15 text-bad" : "bg-warn/15 text-warn"}`}
+            >
+              <span aria-hidden>{a.level === "over" ? "⛔" : a.scope === "pace" ? "📈" : "⚠️"}</span>
+              <span>{a.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <section className="rounded-3xl bg-gradient-to-br from-navy to-navy-2 p-5 text-white shadow-lg">
         <p className="text-sm text-white/70">Left today</p>
