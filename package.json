@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test src/lib/budget.test.ts src/lib/loan.test.ts src/lib/planner.test.ts src/lib/alerts.test.ts"
+    "test": "node --test src/lib/budget.test.ts src/lib/loan.test.ts src/lib/planner.test.ts src/lib/alerts.test.ts src/lib/month.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

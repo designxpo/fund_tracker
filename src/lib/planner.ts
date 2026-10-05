@@ -60,7 +60,7 @@ export function lineAmount(line: PlanLine, ym: YM, inp: PlannerInputs): number {
   return line.planned;
 }
 
-const isCommitment = (l: PlanLine) => l.kind !== "bills" && l.kind !== "unspent";
+const isCommitment = (l: PlanLine) => l.kind !== "bills" && l.kind !== "unspent" && l.kind !== "adjustment";
 
 export function commitments(ym: YM, inp: PlannerInputs) {
   return linesFor(ym, inp).filter(isCommitment).reduce((s, l) => s + lineAmount(l, ym, inp), 0);

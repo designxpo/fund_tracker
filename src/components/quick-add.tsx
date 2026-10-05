@@ -8,7 +8,7 @@ import { addDays, cycleEnd, dailyOnly, isBirthdayWindow, parseYmd, sumBetween, s
 import { createClient } from "@/lib/supabase/client";
 import { inr } from "@/lib/money";
 import { spendImpact } from "@/lib/alerts";
-import { isDaily, type Spend, type SpendType, type StorePlanItem } from "@/lib/types";
+import { isDaily, type FundSettle, type Spend, type SpendType, type StorePlanItem } from "@/lib/types";
 
 type QA = { open: (editing?: Spend) => void };
 const QACtx = createContext<QA>({ open: () => {} });
@@ -73,6 +73,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const [spendType, setSpendType] = useState<SpendType>("daily");
   const [fundId, setFundId] = useState<string | null>(null);
   const [covering, setCovering] = useState(false);
+  const [settleChoice, setSettleChoice] = useState<FundSettle | null>(null); // null = decide from the card
   const [busy, setBusy] = useState(false);
 
   const open = (spend?: Spend) => {
@@ -90,6 +91,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
       setSpendType(spend?.spend_type ?? "daily");
       setFundId(spend?.spend_type === "planned" ? (spend.goal_id ?? null) : null);
       setCovering(false);
+      setSettleChoice(spend && !isDaily(spend) ? (spend.fund_settle ?? "now") : null);
       setOpen(true);
     });
     amountRef.current?.focus({ preventScroll: true });
@@ -123,11 +125,15 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const emergency = goals.find((g) => g.name === "Emergency fund");
   const fund =
     spendType === "planned" ? (sinkingFunds.find((g) => g.id === fundId) ?? sinkingFunds[0]) : spendType === "unplanned" ? buffer : undefined;
-  // When editing, this spend's own withdrawal is already in the balance: add it back.
+  // Paid by credit card → the fund pays when the card bill is paid; cash/UPI/debit → it pays now.
+  const onCreditCard = !!card && card.monthly_cap > 0;
+  const settle: FundSettle = settleChoice ?? (onCreditCard ? "bill" : "now");
+  // What the fund really has free (balance minus what it already owes on card bills).
+  // When editing, this spend's own amount is already counted in there: add it back.
   const fundAvail = fund
-    ? fund.balance + (editing && !isDaily(editing) && editing.goal_id === fund.id ? Number(editing.amount) : 0)
+    ? fund.available + (editing && !isDaily(editing) && editing.goal_id === fund.id ? Number(editing.amount) : 0)
     : 0;
-  const shortfall = spendType === "unplanned" ? Math.max(0, amt - fundAvail) : 0;
+  const shortfall = spendType === "unplanned" && settle === "now" ? Math.max(0, amt - fundAvail) : 0;
 
   // Most-used categories first (this cycle), then configured order.
   const sortedCats = useMemo(() => {
@@ -194,6 +200,9 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
       spent_on: date || today,
       spend_type: spendType,
       goal_id: spendType === "daily" ? null : (fund?.id ?? null),
+      fund_settle: spendType === "daily" ? ("now" as const) : settle,
+      fund_settled_on:
+        spendType !== "daily" && settle === "now" && editing?.fund_settle === "bill" ? today : settle === "now" ? (editing?.fund_settled_on ?? null) : null,
     };
     let next: Spend[];
     if (editing) {
@@ -207,6 +216,8 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
     if (spendType === "daily") {
       const left = summarize(next, cycle, today).leftToday;
       msg = `${inr(amt)} · ${category?.name} · ${card?.nickname ?? "No card"} — ${left >= 0 ? `${inr(left)} left today` : `${inr(-left)} over today`}`;
+    } else if (settle === "bill" && fund) {
+      msg = `${inr(amt)} on ${card?.nickname ?? "card"} · ${fund.name} pays it when you settle the bill · daily budget untouched`;
     } else if (spendType === "planned" && fund) {
       const movesDue = fund.next_due_date && !(editing && editing.spend_type === "planned" && editing.goal_id === fund.id);
       msg = `${inr(amt)} from ${fund.name} → ${inr(fundAvail - amt)} left${movesDue ? ` · next due ${shortDate(addMonthsIso(fund.next_due_date!, fund.cycle_months ?? 1))}` : ""}`;
@@ -343,13 +354,13 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
                   <Chips>
                     {sinkingFunds.map((f) => (
                       <Chip key={f.id} active={fund?.id === f.id} onClick={() => setFundId(f.id)}>
-                        {f.name} · {inr(Math.round(f.balance))}
+                        {f.name} · {inr(Math.round(f.available))}
                       </Chip>
                     ))}
                   </Chips>
                   {fund && amt > 0 && (
                     <p className={`mt-1.5 text-sm ${fundAvail - amt < 0 ? "font-medium text-warn" : "text-muted"}`}>
-                      {fund.name}: {inr(fundAvail)} → {inr(fundAvail - amt)}
+                      {fund.name}: {inr(fundAvail)} free → {inr(fundAvail - amt)}
                       {fundAvail - amt < 0 ? " (more than the fund holds)" : ""} · daily budget untouched
                     </p>
                   )}
@@ -358,11 +369,34 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
             {spendType === "unplanned" && (
               <p className={`mt-1.5 text-sm ${shortfall > 0 ? "font-medium text-bad" : "text-muted"}`}>
                 {buffer
-                  ? shortfall > 0
-                    ? `Surprise buffer has ${inr(fundAvail)}: ${inr(shortfall)} short. You'll pick where the rest comes from.`
-                    : `From Surprise buffer: ${inr(fundAvail)}${amt > 0 ? ` → ${inr(fundAvail - amt)}` : " available"} · daily budget untouched`
+                  ? settle === "bill"
+                    ? `On the card bill: Surprise buffer pays it when you settle (${inr(fundAvail)} free now) · daily budget untouched`
+                    : shortfall > 0
+                      ? `Surprise buffer has ${inr(fundAvail)}: ${inr(shortfall)} short. You'll pick where the rest comes from.`
+                      : `From Surprise buffer: ${inr(fundAvail)}${amt > 0 ? ` → ${inr(fundAvail - amt)}` : " available"} · daily budget untouched`
                   : "No Surprise buffer found."}
               </p>
+            )}
+            {spendType !== "daily" && fund && (
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                <span className="text-muted">Take from {fund.name}:</span>
+                <div role="radiogroup" aria-label="When the fund pays" className="flex rounded-full bg-ink/[.06] p-0.5 font-semibold">
+                  {(["now", "bill"] as const).map((v) => (
+                    <button
+                      key={v}
+                      role="radio"
+                      aria-checked={settle === v}
+                      onClick={() => {
+                        setSettleChoice(v);
+                        setCovering(false);
+                      }}
+                      className={`h-7 rounded-full px-3 ${settle === v ? "bg-white text-ink shadow-[0_2px_8px_-2px_rgba(20,38,79,.25)]" : "text-muted"}`}
+                    >
+                      {v === "now" ? "Now" : "On card bill"}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             {impact && (
               <p role={impact.level === "over" ? "alert" : undefined} className={`mt-1.5 text-sm ${impact.level === "over" ? "font-medium text-bad" : "text-muted"}`}>

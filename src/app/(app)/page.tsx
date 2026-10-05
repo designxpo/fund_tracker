@@ -5,6 +5,7 @@ import { useStore } from "@/lib/store";
 import { useQuickAdd } from "@/components/quick-add";
 import { useToast } from "@/components/toast";
 import { CardStrip } from "@/components/card-strip";
+import { OutsideBudget } from "@/components/outside-budget";
 import { SpendRow } from "@/components/spend-row";
 import Link from "next/link";
 import { billsDueSoon, ordinal, parseYmd, salaryPromptDue, sinkingDueSoon } from "@/lib/budget";
@@ -176,6 +177,8 @@ export default function HomePage() {
       </div>
 
       <CardStrip />
+
+      <OutsideBudget />
 
       <section>
         <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold">

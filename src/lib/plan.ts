@@ -2,7 +2,7 @@ export type PlanItem = {
   id: string;
   cycle_id: string;
   name: string;
-  kind: "loan" | "fixed" | "buffer" | "savings" | "prepayment" | "bills" | "unspent";
+  kind: "loan" | "fixed" | "buffer" | "savings" | "prepayment" | "bills" | "unspent" | "adjustment";
   goal_id: string | null;
   planned: number;
   actual: number | null;
@@ -25,6 +25,7 @@ export function stepOf(i: PlanItem, goals: Goal[]): number {
     case "buffer": return 5;
     case "prepayment": return 9;
     case "unspent": return 10;
+    case "adjustment": return 11;
     case "savings": {
       const g = goals.find((x) => x.id === i.goal_id);
       if (g?.kind === "sinking") return 4;
@@ -43,7 +44,8 @@ export const STEP_TITLES: Record<number, string> = {
   7: "Trip fund",
   8: "Long-term investing",
   9: "Loan prepayment",
-  10: "Move unspent daily budget → Trip fund",
+  10: "Last cycle's daily budget: move what's left / cover the overspend",
+  11: "This month's leftover / borrowed",
 };
 
 export const normalizePlan = (r: Record<string, unknown>): PlanItem =>

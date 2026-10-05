@@ -3,23 +3,29 @@
 import { capLevel, sumBetween } from "@/lib/budget";
 import { inr } from "@/lib/money";
 import { useStore } from "@/lib/store";
+import { isDaily } from "@/lib/types";
 
 const BAR = { ok: "bg-good", amber: "bg-warn", red: "bg-bad" } as const;
 const TEXT = { ok: "text-muted", amber: "text-warn", red: "text-bad" } as const;
 
 export function CardStrip() {
-  const { cards, dailySpends, summary } = useStore();
+  const { cards, dailySpends, spends, summary } = useStore();
   if (!summary) return null;
   return (
     <section aria-label="Cards" className="grid grid-cols-2 gap-3">
       {cards.map((c) => {
         const spent = sumBetween(dailySpends, summary.cycle.start, summary.cycle.end, c.id);
         const level = capLevel(spent, c.monthly_cap);
+        // Planned/unplanned spends are on the card bill but don't use up the cap.
+        const extra = spends
+          .filter((s) => !isDaily(s) && s.card_id === c.id && s.spent_on >= summary.cycle.start && s.spent_on <= summary.cycle.end)
+          .reduce((t, s) => t + Number(s.amount), 0);
         const pct = c.monthly_cap > 0 ? Math.min(100, (spent / c.monthly_cap) * 100) : 0;
         return (
           <div key={c.id} className="rounded-2xl bg-surface p-3 shadow-sm">
             <p className="truncate text-xs font-medium text-muted">{c.nickname}</p>
             <p className="mt-1 text-lg font-semibold tabular-nums">{inr(spent)}</p>
+            {extra > 0 && <p className="-mt-0.5 text-[11px] font-medium text-navy">+{inr(extra)} planned/unplanned</p>}
             {c.monthly_cap > 0 ? (
               <>
                 <div

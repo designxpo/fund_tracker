@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { summarize, todayStr } from "@/lib/budget";
-import { isDaily, type Card, type Category, type Cycle, type Settings, type Spend, type StoreGoal, type StorePlanItem } from "@/lib/types";
+import { isDaily, isOwed, type Card, type Category, type Cycle, type Settings, type Spend, type StoreGoal, type StorePlanItem } from "@/lib/types";
 
 type Op = { kind: "upsert"; spend: Spend } | { kind: "delete"; id: string };
 
@@ -17,9 +17,15 @@ type Cache = {
   planItems?: StorePlanItem[];
   /** goal id → money moved by planned/unplanned spends still waiting to sync */
   pendingGoalDelta?: Record<string, number>;
+  /** owed spends from before this cycle (current-cycle ones are in `spends`) */
+  olderOwed?: Spend[];
 };
 
-type Ctx = Omit<Cache, "goals" | "planItems" | "pendingGoalDelta"> & {
+type Ctx = Omit<Cache, "goals" | "planItems" | "pendingGoalDelta" | "olderOwed"> & {
+  /** Planned/unplanned card spends waiting for their fund to pay (any date). */
+  owedSpends: Spend[];
+  /** Fund pays for it now (on paying the card bill). */
+  settleSpends: (spends: Spend[]) => void;
   goals: StoreGoal[];
   /** Current cycle's plan. */
   planItems: StorePlanItem[];
@@ -66,7 +72,7 @@ const write = (key: string, value: unknown) => {
 function goalDelta(base: Spend[], ops: Op[], current: Spend[]): Record<string, number> {
   const out: Record<string, number> = {};
   const add = (sp: Spend | undefined, sign: number) => {
-    if (sp && !isDaily(sp) && sp.goal_id) out[sp.goal_id] = (out[sp.goal_id] ?? 0) + sign * Number(sp.amount);
+    if (sp && !isDaily(sp) && sp.goal_id && sp.fund_settle !== "bill") out[sp.goal_id] = (out[sp.goal_id] ?? 0) + sign * Number(sp.amount);
   };
   const ids = new Set(ops.map((o) => (o.kind === "upsert" ? o.spend.id : o.id)));
   ids.forEach((id) => {
@@ -192,6 +198,9 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
         const { opening_balance, ...rest } = row;
         return { ...rest, serverBalance: Number(opening_balance ?? 0) + (txSum.get(row.id) ?? 0) };
       });
+      const owedOld = cycle
+        ? await sb.from("spends").select("*").eq("fund_settle", "bill").lt("spent_on", cycle.starts_on)
+        : { data: [], error: null };
       const pi = cycle
         ? await sb.from("plan_items").select("id, name, kind, goal_id, planned, actual, done").eq("cycle_id", cycle.id)
         : { data: [], error: null };
@@ -203,6 +212,7 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
         settings: (st.data as Settings | null) ?? null,
         goals,
         planItems: ((pi.data ?? []) as Row[]).map((r) => num<StorePlanItem>(r)),
+        olderOwed: ((owedOld.data ?? []) as Row[]).map((r) => num<Spend>(r)),
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load data");
@@ -286,16 +296,38 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
     [data.cycle, dailySpends, today],
   );
 
-  // Goal balances = server balance + the effect of planned/unplanned spends that haven't synced yet.
+  const owedSpends = useMemo(
+    () => [...(data.olderOwed ?? []).filter((o) => !data.spends.some((s) => s.id === o.id)), ...data.spends].filter(isOwed),
+    [data.olderOwed, data.spends],
+  );
+
+  // Goal balances = server balance + unsynced effects; "available" also sets aside what the fund owes on card bills.
   const goals = useMemo<StoreGoal[]>(
-    () => (data.goals ?? []).map((g) => ({ ...g, balance: g.serverBalance + (data.pendingGoalDelta?.[g.id] ?? 0) })),
-    [data.goals, data.pendingGoalDelta],
+    () =>
+      (data.goals ?? []).map((g) => {
+        const balance = g.serverBalance + (data.pendingGoalDelta?.[g.id] ?? 0);
+        const owed = owedSpends.filter((s) => s.goal_id === g.id).reduce((t, s) => t + Number(s.amount), 0);
+        return { ...g, balance, owed, available: balance - owed };
+      }),
+    [data.goals, data.pendingGoalDelta, owedSpends],
+  );
+
+  const settleSpends: Ctx["settleSpends"] = useCallback(
+    (list) => {
+      const on = todayStr();
+      list.forEach((s) => enqueue({ kind: "upsert", spend: { ...s, fund_settle: "now", fund_settled_on: on } }));
+      // older owed spends aren't in the cycle list; drop them locally until the reload
+      setData((d) => ({ ...d, olderOwed: (d.olderOwed ?? []).filter((o) => !list.some((x) => x.id === o.id)) }));
+    },
+    [enqueue],
   );
 
   const value = useMemo<Ctx>(
     () => ({
       ...data,
       goals,
+      owedSpends,
+      settleSpends,
       planItems: data.planItems ?? [],
       dailySpends,
       ready,
@@ -309,7 +341,7 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
       restoreSpend,
       reload: load,
     }),
-    [data, goals, dailySpends, ready, today, pending, error, summary, addSpend, updateSpend, deleteSpend, restoreSpend, load],
+    [data, goals, owedSpends, settleSpends, dailySpends, ready, today, pending, error, summary, addSpend, updateSpend, deleteSpend, restoreSpend, load],
   );
 
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;

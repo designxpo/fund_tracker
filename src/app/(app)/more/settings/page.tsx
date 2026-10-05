@@ -106,7 +106,7 @@ export default function SettingsPage() {
   const { data, reload } = useData(async () => {
     if (!cycle) return null;
     const [items, goals, templates] = await Promise.all([
-      sb.from("plan_items").select("*").eq("cycle_id", cycle.id).not("kind", "in", "(bills,unspent)").order("kind").order("name").then(ok),
+      sb.from("plan_items").select("*").eq("cycle_id", cycle.id).not("kind", "in", "(bills,unspent,adjustment)").order("kind").order("name").then(ok),
       sb.from("goals").select("*").order("name").then(ok),
       sb.from("plan_templates").select("*").order("month").order("sort_order").then(ok),
     ]);

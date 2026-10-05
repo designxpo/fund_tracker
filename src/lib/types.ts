@@ -29,7 +29,14 @@ export type Spend = {
    *  unplanned = paid from the Surprise buffer. Missing on old cached rows → treat as daily. */
   spend_type?: SpendType;
   goal_id?: string | null;
+  /** planned/unplanned only: "now" takes it from the fund immediately; "bill" waits until the card bill is paid. */
+  fund_settle?: FundSettle;
+  fund_settled_on?: string | null;
 };
+
+export type FundSettle = "now" | "bill";
+/** A planned/unplanned spend whose fund hasn't paid yet (it's on the card bill). */
+export const isOwed = (s: Spend) => !isDaily(s) && !!s.goal_id && s.fund_settle === "bill";
 
 export type SpendType = "daily" | "planned" | "unplanned";
 export const isDaily = (s: { spend_type?: SpendType }) => (s.spend_type ?? "daily") === "daily";
@@ -48,6 +55,10 @@ export type StoreGoal = {
   serverBalance: number;
   /** serverBalance adjusted for planned/unplanned spends still waiting to sync */
   balance: number;
+  /** planned/unplanned card spends this fund will pay when the card bill is settled */
+  owed: number;
+  /** balance − owed: what's really free in the fund */
+  available: number;
 };
 
 export type StorePlanItem = {
