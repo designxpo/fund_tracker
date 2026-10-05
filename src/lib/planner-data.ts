@@ -8,6 +8,7 @@ import type { Cycle } from "@/lib/types";
 export type GoalRow = {
   id: string;
   name: string;
+  role: string | null;
   target: number | null;
   opening_balance: number;
   is_custom: boolean;
@@ -19,7 +20,7 @@ export type GoalRow = {
 
 export type TemplateRow = PlanLine & { id: string; month: string };
 export type IncomeRow = { id: string; amount: number; source: string; received_on: string; recurring: boolean; note: string | null };
-export type PlanItemRow = PlanLine & { id: string };
+export type PlanItemRow = PlanLine & { id: string; loan_id: string | null };
 export type Split = { goal_id: string; pct: number }[];
 
 /** Everything the planner screens need, plus a ready-made `inputs` for `simulate`. */
@@ -27,7 +28,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
   const [goals, txs, items, tplRows, loans, income, settings] = await Promise.all([
     sb.from("goals").select("*").then(ok),
     sb.from("goal_transactions").select("goal_id, amount").then(ok),
-    sb.from("plan_items").select("id, name, kind, planned, goal_id").eq("cycle_id", cycle.id).then(ok),
+    sb.from("plan_items").select("id, name, kind, planned, goal_id, loan_id").eq("cycle_id", cycle.id).then(ok),
     sb.from("plan_templates").select("id, month, name, kind, goal_id, planned, sort_order").order("month").order("sort_order").then(ok),
     sb.from("loan").select("*").limit(1).then(ok),
     sb.from("income").select("*").order("received_on", { ascending: false }).limit(200).then(ok),
@@ -40,6 +41,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
   const goalRows: GoalRow[] = (goals as Record<string, unknown>[]).map((g) => ({
     id: g.id as string,
     name: g.name as string,
+    role: (g.role as string) ?? null,
     target: g.target == null ? null : Number(g.target),
     opening_balance: Number(g.opening_balance ?? 0),
     is_custom: Boolean(g.is_custom),
@@ -55,6 +57,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
     kind: i.kind as string,
     planned: Number(i.planned),
     goal_id: (i.goal_id as string) ?? null,
+    loan_id: (i.loan_id as string) ?? null,
   }));
   // Month-specific plans, grouped by month ("YYYY-MM").
   const templateRows: TemplateRow[] = (tplRows as Record<string, unknown>[]).map((t) => ({
@@ -77,10 +80,8 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
   // Which plan lines belong to the loan (its EMI + prepayments), and when do they stop?
   // Close date comes from the loan inputs if filled in, else the original end date.
   const loan = (loans as Record<string, unknown>[])[0];
-  const loanName = String(loan?.name ?? "Loan").toLowerCase();
-  const loanLines = lines
-    .filter((l) => l.kind === "prepayment" || (l.kind === "loan" && l.name.toLowerCase().startsWith(loanName)))
-    .map((l) => l.name);
+  // Plan lines linked to the loan (its EMI and prepayment) stop once it closes.
+  const loanLines = lines.filter((l) => l.kind === "prepayment" || (l.kind === "loan" && l.loan_id)).map((l) => l.name);
   const prepayLines = lines.filter((l) => l.kind === "prepayment");
   let loanFreeFrom: string | null = null;
   if (loan) {

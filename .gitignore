@@ -43,3 +43,8 @@ next-env.d.ts
 
 # personal financial data (seed with real numbers)
 supabase/personal/
+!.env.db.example
+
+# playwright
+/test-results/
+/playwright-report/

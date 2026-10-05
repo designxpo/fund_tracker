@@ -16,7 +16,6 @@ const items: MonthItem[] = [
   { name: "Mutual fund SIP", kind: "savings", planned: 4000, actual: 4000, goal_id: "lt" },
   { name: "Gold", kind: "savings", planned: 1500, actual: 2500, goal_id: "lt" },
   { name: "Loan prepayment", kind: "prepayment", planned: 0, actual: null, goal_id: null },
-  { name: "Card bills (last cycle)", kind: "bills", planned: 9999, actual: null, goal_id: null },
 ];
 
 test("month summary: plan vs actual and what's left", () => {
@@ -32,15 +31,16 @@ test("month summary: plan vs actual and what's left", () => {
 });
 
 test("moving the leftover to a goal balances the month", () => {
-  const m = monthSummary(55000, 15500, [...items, { name: "Leftover → Trip fund", kind: "adjustment", planned: 3000, actual: 3000, goal_id: "trip" }]);
+  const m = monthSummary(55000, 15500, items, [{ kind: "leftover", amount: 3000, goal_id: "trip" }]);
   assert.equal(m.result, 0);
 });
 
 test("a shortfall is negative and borrowing covers it", () => {
   const over = items.map((i) => (i.name === "Supplements" ? { ...i, actual: 9000 } : i));
   assert.equal(monthSummary(55000, 15500, over).result, -6000);
-  const covered = [...over, { name: "Borrowed from Trip fund", kind: "adjustment", planned: -6000, actual: -6000, goal_id: "trip" }];
-  assert.equal(monthSummary(55000, 15500, covered).result, 0);
+  assert.equal(monthSummary(55000, 15500, over, [{ kind: "borrow", amount: -6000, goal_id: "trip" }]).result, 0);
+  // card bills / daily result settlements don't change this month's balance
+  assert.equal(monthSummary(55000, 15500, over, [{ kind: "card_bills", amount: 9999, goal_id: null }]).result, -6000);
 });
 
 test("salary utilisation across buckets", () => {
@@ -52,4 +52,10 @@ test("salary utilisation across buckets", () => {
   assert.equal(by.daily, 1041);
   assert.equal(by.dailyLeft, 14459);
   assert.equal(u.left, 55000 - (17000 + 4000 + 15500 + 15500));
+});
+
+test("leftover sent to the loan counts as EMIs & loan", () => {
+  const u = salaryUtilisation(55000, 15500, 0, items, [{ kind: "leftover", amount: 3000, goal_id: null }]);
+  assert.equal(u.rows.find((r) => r.key === "emis")!.amount, 20000);
+  assert.equal(u.left, 0);
 });

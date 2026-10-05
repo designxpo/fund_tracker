@@ -31,7 +31,7 @@ export default function LoanPage() {
   const toast = useToast();
   const sb = createClient();
 
-  const { data, reload } = useData(async () => {
+  const { data, reload } = useData("loan", async () => {
     const [loan, pre, items, templates] = await Promise.all([
       sb.from("loan").select("*").limit(1).then(ok),
       sb.from("loan_prepayments").select("*").order("paid_on", { ascending: false }).then(ok),

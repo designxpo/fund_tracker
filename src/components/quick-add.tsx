@@ -5,7 +5,8 @@ import { flushSync } from "react-dom";
 import { useStore } from "@/lib/store";
 import { useToast } from "@/components/toast";
 import { addDays, cycleEnd, dailyOnly, isBirthdayWindow, parseYmd, sumBetween, summarize, suggestCardId } from "@/lib/budget";
-import { createClient } from "@/lib/supabase/client";
+import { rpc } from "@/lib/rpc";
+import { CapConfirm, CoverDialog, Segmented } from "@/components/quick-add/parts";
 import { inr } from "@/lib/money";
 import { spendImpact } from "@/lib/alerts";
 import { isDaily, type FundSettle, type Spend, type SpendType, type StorePlanItem } from "@/lib/types";
@@ -38,8 +39,6 @@ const TYPES: { key: SpendType; label: string }[] = [
   { key: "unplanned", label: "Unplanned" },
 ];
 
-/** Plan items an unplanned shortfall may be taken from. Emergency fund is never offered here. */
-const COVER_FIRST = ["Trip fund", "Index fund", "Navi prepayment"];
 
 const shortDate = (iso: string) => parseYmd(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 const addMonthsIso = (iso: string, months: number) => {
@@ -120,9 +119,8 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
 
   // Funds: planned → a sinking fund, unplanned → the Surprise buffer used by this cycle's plan.
   const sinkingFunds = goals.filter((g) => g.kind === "sinking").sort((a, b) => (a.next_due_date ?? "9") .localeCompare(b.next_due_date ?? "9"));
-  const bufferGoalId = planItems.find((i) => i.kind === "buffer")?.goal_id;
-  const buffer = goals.find((g) => g.id === bufferGoalId) ?? goals.find((g) => g.kind === "buffer");
-  const emergency = goals.find((g) => g.name === "Emergency fund");
+  const buffer = goals.find((g) => g.role === "buffer") ?? goals.find((g) => g.kind === "buffer");
+  const emergency = goals.find((g) => g.role === "emergency");
   const fund =
     spendType === "planned" ? (sinkingFunds.find((g) => g.id === fundId) ?? sinkingFunds[0]) : spendType === "unplanned" ? buffer : undefined;
   // Paid by credit card → the fund pays when the card bill is paid; cash/UPI/debit → it pays now.
@@ -229,42 +227,21 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
     close();
   };
 
-  /** Move the shortfall into the buffer from a plan item (or, if confirmed, the Emergency fund), then save. */
+  /** Move the shortfall into the buffer from a plan line (or, if confirmed, the Emergency fund), then save. One DB call. */
   async function coverFrom(item: StorePlanItem | "emergency") {
     if (!buffer) return;
-    const sb = createClient();
-    const need = shortfall;
+    if (item === "emergency") {
+      if (!emergency) return;
+      if (!confirm(`Take ${inr(shortfall)} from your Emergency fund to cover this? Only do this for a real emergency.`)) return;
+    }
     setBusy(true);
     try {
-      const check = (r: { error: { message: string } | null }) => {
-        if (r.error) throw new Error(r.error.message);
-      };
-      if (item === "emergency") {
-        if (!emergency) return;
-        if (!confirm(`Take ${inr(need)} from your Emergency fund to cover this? Only do this for a real emergency.`)) return;
-        check(await sb.from("goal_transactions").insert({ goal_id: emergency.id, amount: -need, note: "Moved to Surprise buffer", happened_on: today }));
-      } else if (item.done) {
-        // Already moved on Salary Day: take it back out of that goal/prepayment.
-        const newActual = Math.max(0, (item.actual ?? item.planned) - need);
-        check(await sb.from("plan_items").update({ actual: newActual }).eq("id", item.id));
-        check(await sb.from("goal_transactions").update({ amount: newActual }).eq("plan_item_id", item.id));
-        check(await sb.from("loan_prepayments").update({ amount: newActual }).eq("plan_item_id", item.id));
-      } else {
-        check(
-          await sb
-            .from("plan_items")
-            .update({ planned: Math.max(0, item.planned - need), ...(item.actual != null && { actual: Math.max(0, item.actual - need) }) })
-            .eq("id", item.id),
-        );
-      }
-      check(
-        await sb.from("goal_transactions").insert({
-          goal_id: buffer.id,
-          amount: need,
-          note: `Covered from ${item === "emergency" ? "Emergency fund" : item.name}`,
-          happened_on: today,
-        }),
-      );
+      await rpc("cover_shortfall", {
+        p_buffer: buffer.id,
+        p_amount: shortfall,
+        p_item: item === "emergency" ? null : item.id,
+        p_goal: item === "emergency" ? emergency!.id : null,
+      });
       await reload();
       commit();
     } catch (e) {
@@ -278,9 +255,11 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
     .filter((i) => (i.kind === "savings" || i.kind === "prepayment") && i.goal_id !== emergency?.id)
     .map((i) => ({ item: i, available: i.done ? (i.actual ?? i.planned) : i.planned }))
     .filter((o) => o.available > 0)
+    // Trip fund first, then loan prepayment, then other savings; biggest first within each.
     .sort((a, b) => {
-      const ra = COVER_FIRST.indexOf(a.item.name), rb = COVER_FIRST.indexOf(b.item.name);
-      return (ra < 0 ? 99 : ra) - (rb < 0 ? 99 : rb) || b.available - a.available;
+      const rank = (o: { item: StorePlanItem }) =>
+        goals.find((g) => g.id === o.item.goal_id)?.role === "trip" ? 0 : o.item.kind === "prepayment" ? 1 : 2;
+      return rank(a) - rank(b) || b.available - a.available;
     });
 
   return (
@@ -315,22 +294,15 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
           <div className="overflow-y-auto px-5 pt-3">
             <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-ink/15" />
 
-            <div role="radiogroup" aria-label="Spend type" className="mb-2 grid grid-cols-3 rounded-full bg-ink/[.06] p-0.5 text-[13px] font-semibold">
-              {TYPES.map((t) => (
-                <button
-                  key={t.key}
-                  role="radio"
-                  aria-checked={spendType === t.key}
-                  onClick={() => {
-                    setSpendType(t.key);
-                    setCovering(false);
-                  }}
-                  className={`h-8 rounded-full transition ${spendType === t.key ? "bg-white text-ink shadow-[0_2px_8px_-2px_rgba(20,38,79,.25)]" : "text-muted"}`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              label="Spend type"
+              options={TYPES}
+              value={spendType}
+              onChange={(t) => {
+                setSpendType(t);
+                setCovering(false);
+              }}
+            />
 
             <label className="flex items-baseline gap-1 border-b border-line pb-2">
               <span className="text-3xl font-semibold text-muted">₹</span>
@@ -380,22 +352,19 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
             {spendType !== "daily" && fund && (
               <div className="mt-2 flex items-center gap-2 text-xs">
                 <span className="text-muted">Take from {fund.name}:</span>
-                <div role="radiogroup" aria-label="When the fund pays" className="flex rounded-full bg-ink/[.06] p-0.5 font-semibold">
-                  {(["now", "bill"] as const).map((v) => (
-                    <button
-                      key={v}
-                      role="radio"
-                      aria-checked={settle === v}
-                      onClick={() => {
-                        setSettleChoice(v);
-                        setCovering(false);
-                      }}
-                      className={`h-7 rounded-full px-3 ${settle === v ? "bg-white text-ink shadow-[0_2px_8px_-2px_rgba(20,38,79,.25)]" : "text-muted"}`}
-                    >
-                      {v === "now" ? "Now" : "On card bill"}
-                    </button>
-                  ))}
-                </div>
+                <Segmented
+                  label="When the fund pays"
+                  size="sm"
+                  options={[
+                    { key: "now", label: "Now" },
+                    { key: "bill", label: "On card bill" },
+                  ]}
+                  value={settle}
+                  onChange={(v) => {
+                    setSettleChoice(v);
+                    setCovering(false);
+                  }}
+                />
               </div>
             )}
             {impact && (
@@ -466,67 +435,22 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
 
           <div className="px-5 pb-[max(12px,env(safe-area-inset-bottom))] pt-1">
             {covering && shortfall > 0 ? (
-              <div role="alertdialog" aria-label="Cover the shortfall" className="rounded-2xl border border-bad/30 bg-bad/[.07] p-3">
-                <p className="text-sm">
-                  Your Surprise buffer is <b>{inr(shortfall)} short</b>. Take it from this cycle&apos;s plan:
-                </p>
-                {!navigator.onLine && <p className="mt-1 text-xs text-warn">You&apos;re offline: connect to move money between funds.</p>}
-                <ul className="mt-2 space-y-1.5">
-                  {coverOptions.map(({ item, available }) => (
-                    <li key={item.id}>
-                      <button
-                        disabled={busy || available < shortfall || !navigator.onLine}
-                        onClick={() => coverFrom(item)}
-                        className="flex h-11 w-full items-center justify-between rounded-xl bg-white/80 px-3 text-sm disabled:opacity-40"
-                      >
-                        <span className="font-medium">{item.name}</span>
-                        <span className="text-muted">
-                          {inr(available)} → {inr(Math.max(0, available - shortfall))}
-                          {item.done ? " · already moved" : ""}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                  {coverOptions.length === 0 && <li className="text-xs text-muted">No plan items left to reduce this cycle.</li>}
-                </ul>
-                <div className="mt-2 flex items-center justify-between">
-                  <button onClick={() => setCovering(false)} className="h-10 text-sm text-muted">
-                    Cancel
-                  </button>
-                  {emergency && (
-                    <button
-                      disabled={busy || !navigator.onLine}
-                      onClick={() => coverFrom("emergency")}
-                      className="h-10 text-xs font-medium text-bad underline disabled:opacity-40"
-                    >
-                      Use Emergency fund instead…
-                    </button>
-                  )}
-                </div>
-              </div>
+              <CoverDialog
+                shortfall={shortfall}
+                options={coverOptions}
+                hasEmergency={!!emergency}
+                busy={busy}
+                onCover={coverFrom}
+                onCancel={() => setCovering(false)}
+              />
             ) : canSave && needsConfirm ? (
-              <div role="alertdialog" className="rounded-2xl border border-warn/50 bg-warn/10 p-3">
-                <p className="text-sm">
-                  <b>{card?.nickname}</b> would reach {inr(cardSpentBefore + amt)} of its {inr(card?.monthly_cap ?? 0)} cap.
-                  {switchTo ? ` Use ${switchTo.nickname} instead?` : ""}
-                </p>
-                <div className="mt-2 flex gap-2">
-                  {switchTo && (
-                    <button
-                      onClick={() => setPickedCard(switchTo.id)}
-                      className="h-11 flex-1 rounded-xl bg-navy text-sm font-semibold text-white"
-                    >
-                      Switch to {switchTo.nickname}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setConfirmedKey(overKey)}
-                    className="h-11 flex-1 rounded-xl border border-line text-sm font-medium"
-                  >
-                    Keep {card?.nickname}
-                  </button>
-                </div>
-              </div>
+              <CapConfirm
+                card={card}
+                reachesTo={cardSpentBefore + amt}
+                switchTo={switchTo}
+                onSwitch={() => switchTo && setPickedCard(switchTo.id)}
+                onKeep={() => setConfirmedKey(overKey)}
+              />
             ) : (
               <button
                 onClick={save}

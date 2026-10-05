@@ -1,31 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-/** Tiny fetch-on-mount hook for screens that read straight from Supabase. */
-/** `key` re-runs the fetch when it changes (e.g. the current cycle id). */
-export function useData<T>(fetcher: () => Promise<T>, key = "") {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const fn = useRef(fetcher);
-  useEffect(() => {
-    fn.current = fetcher;
-  });
-
-  const reload = useCallback(async () => {
-    try {
-      setData(await fn.current());
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "Couldn't load");
-    }
-  }, []);
-
-  useEffect(() => {
-    void reload();
-  }, [reload, key]);
-
-  return { data, error, reload, loading: data === null && !error };
+/**
+ * Read data through the shared query cache. `name` + `key` identify it: screens using the same
+ * pair share one fetch (e.g. "planner" for Goals, a goal's page and Income).
+ */
+export function useData<T>(name: string, fetcher: () => Promise<T>, key = "") {
+  const q = useQuery({ queryKey: [name, key], queryFn: fetcher });
+  return {
+    data: q.data ?? null,
+    error: q.error ? q.error.message : null,
+    loading: q.isPending,
+    reload: async () => {
+      await q.refetch();
+    },
+  };
 }
 
 /** Throws PostgREST errors so callers can use try/catch with useData. */

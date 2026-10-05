@@ -1,9 +1,11 @@
 // Month (salary cycle) maths: plan vs actual, leftover/shortfall, and where the salary went. Pure, no imports.
 
 export type MonthItem = { name: string; kind: string; planned: number; actual: number | null; goal_id: string | null };
+/** Leftover (+) moved to a goal/loan, or shortfall (−) borrowed from a goal, this cycle. */
+export type MonthSettlement = { kind: string; amount: number; goal_id: string | null };
 
 const amountOf = (i: MonthItem) => Number(i.actual ?? i.planned);
-const isPlanLine = (i: MonthItem) => i.kind !== "bills" && i.kind !== "unspent" && i.kind !== "adjustment";
+const isMove = (s: MonthSettlement) => s.kind === "leftover" || s.kind === "borrow";
 
 export type MonthSummary = {
   salary: number;
@@ -16,11 +18,11 @@ export type MonthSummary = {
   variances: { name: string; diff: number }[]; // diff > 0 overspent, < 0 saved vs plan
 };
 
-export function monthSummary(salary: number, dailyReserve: number, items: MonthItem[]): MonthSummary {
-  const lines = items.filter(isPlanLine);
+export function monthSummary(salary: number, dailyReserve: number, items: MonthItem[], settlements: MonthSettlement[] = []): MonthSummary {
+  const lines = items;
   const plannedTotal = lines.reduce((t, i) => t + Number(i.planned), 0);
   const actualTotal = lines.reduce((t, i) => t + amountOf(i), 0);
-  const adjustments = items.filter((i) => i.kind === "adjustment").reduce((t, i) => t + Number(i.planned), 0);
+  const adjustments = settlements.filter(isMove).reduce((t, s) => t + Number(s.amount), 0);
   const variances = lines
     .filter((i) => i.actual != null && Number(i.actual) !== Number(i.planned))
     .map((i) => ({ name: i.name, diff: Number(i.actual) - Number(i.planned) }))
@@ -39,11 +41,19 @@ export function monthSummary(salary: number, dailyReserve: number, items: MonthI
 export type UtilRow = { key: string; label: string; amount: number };
 
 /** Where the salary is going this cycle, whatever the payment mode. */
-export function salaryUtilisation(salary: number, dailyReserve: number, dailySpent: number, items: MonthItem[]) {
+export function salaryUtilisation(
+  salary: number,
+  dailyReserve: number,
+  dailySpent: number,
+  items: MonthItem[],
+  settlements: MonthSettlement[] = [],
+) {
   const sum = (f: (i: MonthItem) => boolean) => items.filter(f).reduce((t, i) => t + amountOf(i), 0);
-  const emis = sum((i) => i.kind === "loan" || i.kind === "prepayment" || (i.kind === "adjustment" && !i.goal_id));
+  const moved = (toGoal: boolean) =>
+    settlements.filter((s) => isMove(s) && !!s.goal_id === toGoal).reduce((t, s) => t + Number(s.amount), 0);
+  const emis = sum((i) => i.kind === "loan" || i.kind === "prepayment") + moved(false);
   const fixed = sum((i) => i.kind === "fixed");
-  const saved = sum((i) => i.kind === "savings" || i.kind === "buffer" || (i.kind === "adjustment" && !!i.goal_id));
+  const saved = sum((i) => i.kind === "savings" || i.kind === "buffer") + moved(true);
   const dailyLeft = Math.max(0, dailyReserve - dailySpent);
   const rows: UtilRow[] = [
     { key: "emis", label: "EMIs & loan", amount: emis },

@@ -1,10 +1,12 @@
 "use client";
 
 import { StoreProvider } from "@/lib/store";
+import { QueryProvider } from "@/lib/query-provider";
 import { ToastProvider } from "@/components/toast";
 import { QuickAddProvider, useQuickAdd } from "@/components/quick-add";
 import { BottomNav } from "@/components/bottom-nav";
 import { PlusIcon } from "@/components/icons";
+import { ErrorReporter } from "@/components/error-reporter";
 
 function Fab() {
   const { open } = useQuickAdd();
@@ -21,14 +23,17 @@ function Fab() {
 
 export function AppShell({ userId, children }: { userId: string; children: React.ReactNode }) {
   return (
-    <StoreProvider userId={userId}>
-      <ToastProvider>
-        <QuickAddProvider>
-          <div className="mx-auto min-h-dvh w-full max-w-md px-4 pb-44 pt-[max(16px,env(safe-area-inset-top))]">{children}</div>
-          <Fab />
-          <BottomNav />
-        </QuickAddProvider>
-      </ToastProvider>
-    </StoreProvider>
+    <QueryProvider userId={userId}>
+      <StoreProvider userId={userId}>
+        <ToastProvider>
+          <QuickAddProvider>
+            <div className="mx-auto min-h-dvh w-full max-w-md px-4 pb-44 pt-[max(16px,env(safe-area-inset-top))]">{children}</div>
+            <Fab />
+            <BottomNav />
+            <ErrorReporter />
+          </QuickAddProvider>
+        </ToastProvider>
+      </StoreProvider>
+    </QueryProvider>
   );
 }

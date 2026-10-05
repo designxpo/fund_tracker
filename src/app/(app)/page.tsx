@@ -57,7 +57,7 @@ function useOnline() {
 }
 
 export default function HomePage() {
-  const { ready, summary, spends, today, cards, categories, cycle, goals, pending, error, deleteSpend, restoreSpend } = useStore();
+  const { ready, summary, spends, today, cards, categories, cycle, goals, pending, error, failed, retryFailed, discardFailed, deleteSpend, restoreSpend } = useStore();
   const { open } = useQuickAdd();
   const toast = useToast();
   const online = useOnline();
@@ -113,6 +113,25 @@ export default function HomePage() {
           <b>{d.nickname}</b> bill due {d.inDays === 0 ? "today" : `on the ${ordinal(d.day)}`}: pay in full.
         </p>
       ))}
+
+      {failed.length > 0 && (
+        <div role="alert" className="rounded-2xl bg-bad/10 p-3 text-sm text-bad">
+          <p>
+            <b>{failed.length === 1 ? "1 change" : `${failed.length} changes`} couldn&apos;t sync:</b> {failed[0].message}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button onClick={retryFailed} className="h-10 flex-1 rounded-full bg-navy text-sm font-semibold text-white">
+              Retry
+            </button>
+            <button
+              onClick={() => confirm("Discard these changes? They won't be saved.") && discardFailed()}
+              className="h-10 flex-1 rounded-full border border-bad/30 text-sm font-medium"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
 
       {alerts.length > 0 && (
         <ul aria-label="Budget alerts" className="space-y-2">

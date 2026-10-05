@@ -14,8 +14,10 @@ import { addMonths, ymLabel } from "@/lib/planner";
 import { diffDays, sinkingTarget } from "@/lib/budget";
 
 const SAVINGS_2M_TARGET = 50000;
-const WITHDRAWABLE = new Set(["Surprise buffer", "Emergency fund"]);
-const ICON: Record<string, string> = { "Emergency fund": "🛟", "Trip fund": "✈️", "Long-term invested": "📈", "Surprise buffer": "🎁" };
+// Built-in goals are identified by role, so renaming them doesn't break anything.
+const WITHDRAWABLE = new Set(["buffer", "emergency"]);
+const ROLE_ICON: Record<string, string> = { emergency: "🛟", trip: "✈️", long_term: "📈", buffer: "🎁" };
+const ROLE_ORDER = ["emergency", "trip", "long_term", "buffer"];
 
 type Tx = { id: string; goal_id: string; amount: number; note: string | null; happened_on: string };
 
@@ -28,7 +30,7 @@ export default function GoalsPage() {
   const [note, setNote] = useState("");
   const [open, setOpen] = useState<string | null>(null);
 
-  const { data, reload } = useData(async () => {
+  const { data, reload } = useData("goals-page", async () => {
     if (!cycle) return null;
     const [goals, txs, items, templates] = await Promise.all([
       sb.from("goals").select("*").order("name").then(ok),
@@ -44,13 +46,13 @@ export default function GoalsPage() {
     };
   }, cycle?.id);
 
-  const planner = useData(async () => (cycle ? loadPlanner(sb, cycle, today) : null), cycle?.id);
+  const planner = useData("planner", async () => (cycle ? loadPlanner(sb, cycle, today) : null), cycle?.id);
 
   if (!ready || !data) return <div className="h-64 animate-pulse rounded-3xl bg-surface" />;
   const { goals, txs, items, templates } = data;
 
-  const order = ["Emergency fund", "Trip fund", "Long-term invested", "Surprise buffer"];
-  const sorted = goals.filter((g) => !(g as Goal & { is_custom?: boolean }).is_custom && (g as Goal).kind !== "sinking").sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+  const roleOf = (g: Goal) => (g as Goal & { role?: string | null }).role ?? "";
+  const sorted = goals.filter((g) => !(g as Goal & { is_custom?: boolean }).is_custom && (g as Goal).kind !== "sinking").sort((a, b) => ROLE_ORDER.indexOf(roleOf(a)) - ROLE_ORDER.indexOf(roleOf(b)));
   const balanceOf = (g: Goal) => g.opening_balance + txs.filter((t) => t.goal_id === g.id).reduce((s, t) => s + t.amount, 0);
 
   // Monthly contribution uses the latest upcoming month's plan if there is one (e.g. the Dec-2026 step-up).
@@ -60,7 +62,7 @@ export default function GoalsPage() {
     latestMonth
       ? templates.filter((t) => t.month.slice(0, 7) === latestMonth && t.goal_id === g.id).reduce((s, t) => s + t.planned, 0)
       : items
-          .filter((i) => i.goal_id === g.id && i.kind !== "unspent")
+          .filter((i) => i.goal_id === g.id)
           .reduce((s, i) => s + amountOf({ planned: i.planned, actual: null }), 0);
 
   const since = addDays(today, -60);
@@ -218,7 +220,7 @@ export default function GoalsPage() {
         return (
           <section key={g.id} className="rounded-2xl bg-surface p-4 shadow-sm">
             <div className="flex items-center gap-3">
-              <span className="grid h-11 w-11 place-items-center rounded-xl bg-bg text-xl">{ICON[g.name] ?? "🎯"}</span>
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-bg text-xl">{ROLE_ICON[roleOf(g)] ?? "🎯"}</span>
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">{g.name}</p>
                 <p className="text-xs text-muted">{g.target ? `Target ${inr(g.target)}` : "No target"}{est ? ` · ${est}` : ""}</p>
@@ -237,7 +239,7 @@ export default function GoalsPage() {
               <button onClick={() => setForm({ goal: g, kind: "deposit" })} className="h-11 flex-1 rounded-xl bg-navy text-sm font-semibold text-white">
                 Add
               </button>
-              {WITHDRAWABLE.has(g.name) && (
+              {WITHDRAWABLE.has(roleOf(g)) && (
                 <button onClick={() => setForm({ goal: g, kind: "withdraw" })} className="h-11 flex-1 rounded-xl border border-line text-sm font-medium">
                   Withdraw
                 </button>

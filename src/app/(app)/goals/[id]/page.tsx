@@ -8,6 +8,7 @@ import { useStore } from "@/lib/store";
 import { useToast } from "@/components/toast";
 import { GoalForm } from "@/components/goal-form";
 import { ok, useData } from "@/lib/use-data";
+import { rpc } from "@/lib/rpc";
 import { loadPlanner, PRIORITY } from "@/lib/planner-data";
 import { addMonths, emiFor, freeMoney, HORIZON, simulate, ymLabel, type PlanLine, type PlannerInputs } from "@/lib/planner";
 import { inr } from "@/lib/money";
@@ -22,7 +23,7 @@ export default function GoalDetailPage() {
   const toast = useToast();
   const sb = createClient();
 
-  const { data, reload } = useData(async () => (cycle ? loadPlanner(sb, cycle, today) : null), cycle?.id);
+  const { data, reload } = useData("planner", async () => (cycle ? loadPlanner(sb, cycle, today) : null), cycle?.id);
 
   const [editing, setEditing] = useState(false);
   const [extra, setExtra] = useState<number | null>(null);
@@ -102,29 +103,15 @@ export default function GoalDetailPage() {
     }
   }
 
+  // One DB call: this cycle's plan, upcoming months' plans and the source line all change together.
   const applyLever = () =>
     run(async () => {
-      const own = data.lines.find((l) => l.goal_id === goal.id);
-      if (own) ok(await sb.from("plan_items").update({ planned: own.planned + x }).eq("id", own.id));
-      else ok(await sb.from("plan_items").insert({ cycle_id: cycle.id, name: goal.name, kind: "savings", goal_id: goal.id, planned: x }));
-
-      if (source === "daily") {
-        ok(await sb.from("cycles").update({ daily_budget: Math.round(inputs.dailyBudget - x / DAYS_PER_MONTH) }).eq("id", cycle.id));
-      } else if (source !== "free") {
-        const line = data.lines.find((l) => l.id === source)!;
-        ok(await sb.from("plan_items").update({ planned: Math.max(0, line.planned - x) }).eq("id", line.id));
-      }
-      // Upcoming months' plans get the same change, so it sticks after Salary Day.
-      const cycleMonth = cycle.starts_on.slice(0, 7);
-      const upcoming = data.templateRows.filter((t) => t.month > cycleMonth);
-      for (const month of [...new Set(upcoming.map((t) => t.month))]) {
-        const rows = upcoming.filter((t) => t.month === month);
-        const mine = rows.find((t) => t.goal_id === goal.id);
-        if (mine) ok(await sb.from("plan_templates").update({ planned: mine.planned + x }).eq("id", mine.id));
-        else ok(await sb.from("plan_templates").insert({ month: `${month}-01`, name: goal.name, kind: "savings", goal_id: goal.id, planned: x, sort_order: 50 }));
-        const src = sourceName ? rows.find((t) => t.name === sourceName) : undefined;
-        if (src) ok(await sb.from("plan_templates").update({ planned: Math.max(0, src.planned - x) }).eq("id", src.id));
-      }
+      await rpc("add_goal_contribution", {
+        p_goal: goal.id,
+        p_amount: x,
+        p_source_item: source !== "free" && source !== "daily" ? source : null,
+        p_from_daily: source === "daily",
+      });
       setExtra(null);
     }, `${inr(x)}/month added to your plan for ${goal.name}`);
 
@@ -140,8 +127,7 @@ export default function GoalDetailPage() {
   const remove = async () => {
     if (!confirm(`Delete "${goal.name}"? Its savings history and plan line go too.`)) return;
     try {
-      ok(await sb.from("plan_items").delete().eq("goal_id", goal.id).eq("cycle_id", cycle.id));
-      ok(await sb.from("goals").delete().eq("id", goal.id));
+      await rpc("delete_goal", { p_goal: goal.id });
       await reloadStore();
       router.replace("/goals");
     } catch (e) {

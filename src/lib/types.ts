@@ -42,10 +42,13 @@ export type SpendType = "daily" | "planned" | "unplanned";
 export const isDaily = (s: { spend_type?: SpendType }) => (s.spend_type ?? "daily") === "daily";
 
 export type GoalKind = "savings" | "sinking" | "buffer";
+/** Built-in goals are found by role, never by name. */
+export type GoalRole = "emergency" | "trip" | "buffer" | "long_term";
 export type StoreGoal = {
   id: string;
   name: string;
   kind: GoalKind;
+  role: GoalRole | null;
   is_custom: boolean;
   target: number | null;
   monthly_contribution: number | null;
@@ -61,11 +64,22 @@ export type StoreGoal = {
   available: number;
 };
 
+export type StoreSettlement = {
+  id: string;
+  kind: "card_bills" | "daily_result" | "leftover" | "borrow";
+  goal_id: string | null;
+  loan_id: string | null;
+  amount: number;
+  done: boolean;
+  note: string | null;
+};
+
 export type StorePlanItem = {
   id: string;
   name: string;
   kind: string;
   goal_id: string | null;
+  loan_id: string | null;
   planned: number;
   actual: number | null;
   done: boolean;

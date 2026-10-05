@@ -7,23 +7,33 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test src/lib/budget.test.ts src/lib/loan.test.ts src/lib/planner.test.ts src/lib/alerts.test.ts src/lib/month.test.ts"
+    "test": "node --test src/lib/budget.test.ts src/lib/loan.test.ts src/lib/planner.test.ts src/lib/alerts.test.ts src/lib/month.test.ts",
+    "db:new": "supabase migration new < /dev/null",
+    "db:push": "supabase db push --db-url \"$DATABASE_URL\"",
+    "db:status": "supabase migration list --db-url \"$DATABASE_URL\"",
+    "test:db": "bash scripts/db-test.sh",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
+    "@tanstack/query-sync-storage-persister": "^5.104.1",
+    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-query-persist-client": "^5.104.1",
     "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
+    "supabase": "^2.119.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

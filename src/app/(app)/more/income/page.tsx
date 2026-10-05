@@ -6,17 +6,18 @@ import { createClient } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store";
 import { useToast } from "@/components/toast";
 import { ok, useData } from "@/lib/use-data";
+import { rpc } from "@/lib/rpc";
 import { loadPlanner, type GoalRow, type Split } from "@/lib/planner-data";
 import { cycleEnd, parseYmd } from "@/lib/budget";
 import { inr } from "@/lib/money";
 
 const SOURCES = ["Freelance", "Bonus", "Refund", "Gift", "Interest", "Cashback", "Other"];
-const SYSTEM_ORDER = ["Emergency fund", "Trip fund", "Long-term invested", "Surprise buffer"];
+const ROLE_ORDER = ["emergency", "trip", "long_term", "buffer"];
 
 /** Custom goals by priority, then the built-in savings goals. */
 const orderGoals = (goals: GoalRow[]) => [
   ...goals.filter((g) => g.is_custom).sort((a, b) => a.priority - b.priority),
-  ...goals.filter((g) => !g.is_custom).sort((a, b) => SYSTEM_ORDER.indexOf(a.name) - SYSTEM_ORDER.indexOf(b.name)),
+  ...goals.filter((g) => !g.is_custom).sort((a, b) => ROLE_ORDER.indexOf(a.role ?? "") - ROLE_ORDER.indexOf(b.role ?? "")),
 ];
 
 function defaultSplit(goals: GoalRow[], saved: Split | null): Record<string, number> {
@@ -24,8 +25,8 @@ function defaultSplit(goals: GoalRow[], saved: Split | null): Record<string, num
   if (saved?.some((s) => ids.has(s.goal_id))) {
     return Object.fromEntries(saved.filter((s) => ids.has(s.goal_id)).map((s) => [s.goal_id, s.pct]));
   }
-  const top = goals.filter((g) => g.is_custom).sort((a, b) => a.priority - b.priority)[0] ?? goals.find((g) => g.name === "Trip fund");
-  const emergency = goals.find((g) => g.name === "Emergency fund");
+  const top = goals.filter((g) => g.is_custom).sort((a, b) => a.priority - b.priority)[0] ?? goals.find((g) => g.role === "trip");
+  const emergency = goals.find((g) => g.role === "emergency");
   return { ...(top && { [top.id]: 50 }), ...(emergency && { [emergency.id]: 30 }) };
 }
 
@@ -34,7 +35,7 @@ export default function IncomePage() {
   const toast = useToast();
   const sb = createClient();
 
-  const { data, reload } = useData(async () => (cycle ? loadPlanner(sb, cycle, today) : null), cycle?.id);
+  const { data, reload } = useData("planner", async () => (cycle ? loadPlanner(sb, cycle, today) : null), cycle?.id);
 
   const [amount, setAmount] = useState("");
   const [source, setSource] = useState("Freelance");
@@ -65,23 +66,20 @@ export default function IncomePage() {
     if (!(amt > 0) || allocatedPct > 100) return;
     setBusy(true);
     try {
-      const inc = ok(
-        await sb
-          .from("income")
-          .insert({ amount: amt, source: src, received_on: date, recurring, note: note.trim() || null })
-          .select("id")
-          .single(),
-      ) as { id: string };
-      const rows = Object.entries(pcts)
+      const split = Object.entries(pcts)
         .filter(([, p]) => p > 0)
-        .map(([goal_id, p]) => ({ goal_id, amount: Math.round((amt * p) / 100), note: `${src} (extra income)`, happened_on: date, income_id: inc.id }))
-        .filter((r) => r.amount > 0);
-      if (rows.length) ok(await sb.from("goal_transactions").insert(rows));
-      if (remember) {
-        const income_split = Object.entries(pcts).filter(([, p]) => p > 0).map(([goal_id, pct]) => ({ goal_id, pct }));
-        const upd = ok(await sb.from("settings").update({ income_split }).not("user_id", "is", null).select("user_id")) as unknown[];
-        if (!upd.length) ok(await sb.from("settings").insert({ income_split }));
-      }
+        .map(([goal_id, pct]) => ({ goal_id, pct }));
+      // One database call: income row + goal deposits + remembered split, all or nothing.
+      await rpc("log_income", {
+        p_amount: amt,
+        p_source: src,
+        p_date: date,
+        p_recurring: recurring,
+        p_note: note,
+        p_split: split,
+        p_remember: remember,
+      });
+      const rows = split.map((x) => ({ amount: Math.round((amt * x.pct) / 100) })).filter((r) => r.amount > 0);
       const kept = amt - rows.reduce((s, r) => s + r.amount, 0);
       toast({ msg: `${inr(amt)} from ${src} logged${rows.length ? ` · ${inr(amt - kept)} to goals` : ""}` });
       setAmount("");

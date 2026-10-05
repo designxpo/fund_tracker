@@ -7,6 +7,7 @@ import { useStore } from "@/lib/store";
 import { useToast } from "@/components/toast";
 import { ok, useData } from "@/lib/use-data";
 import { download, toCsv } from "@/lib/csv";
+import { RecentErrors } from "@/components/recent-errors";
 import { normalizePlan, type Goal, type PlanItem } from "@/lib/plan";
 import { cycleEnd, diffDays } from "@/lib/budget";
 import { addMonths, ymLabel } from "@/lib/planner";
@@ -103,7 +104,7 @@ export default function SettingsPage() {
   const [newItem, setNewItem] = useState({ name: "", planned: "", kind: "fixed" as PlanItem["kind"], goal_id: "" });
   const [planMonth, setPlanMonth] = useState<string>("current"); // "current" or "YYYY-MM"
 
-  const { data, reload } = useData(async () => {
+  const { data, reload } = useData("settings", async () => {
     if (!cycle) return null;
     const [items, goals, templates] = await Promise.all([
       sb.from("plan_items").select("*").eq("cycle_id", cycle.id).not("kind", "in", "(bills,unspent,adjustment)").order("kind").order("name").then(ok),
@@ -397,6 +398,10 @@ export default function SettingsPage() {
         <button onClick={exportCsv} className="h-12 w-full rounded-xl border border-line text-sm font-medium">
           Export all spends (CSV)
         </button>
+      </Section>
+
+      <Section title="Recent app errors" hint="Recorded automatically so problems don't go unnoticed.">
+        <RecentErrors />
       </Section>
     </div>
   );

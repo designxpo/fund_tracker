@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    env:
+      # Public values (shipped to every browser anyway). Add them as repo secrets to build against your project;
+      # without them the app still builds and the smoke tests check the "not configured" screen.
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+
+  database:
+    # Runs the rolled-back SQL tests only when a DATABASE_URL secret is configured.
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip without DATABASE_URL
+        if: env.DATABASE_URL == ''
+        run: echo "No DATABASE_URL secret; skipping database tests."
+      - name: Install psql
+        if: env.DATABASE_URL != ''
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Database tests
+        if: env.DATABASE_URL != ''
+        run: bash scripts/db-test.sh

@@ -1,11 +1,14 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { reportError } from "@/lib/report-error";
 import { summarize, todayStr } from "@/lib/budget";
-import { isDaily, isOwed, type Card, type Category, type Cycle, type Settings, type Spend, type StoreGoal, type StorePlanItem } from "@/lib/types";
+import { isDaily, isOwed, type Card, type Category, type Cycle, type Settings, type Spend, type StoreGoal, type StorePlanItem, type StoreSettlement } from "@/lib/types";
 
 type Op = { kind: "upsert"; spend: Spend } | { kind: "delete"; id: string };
+export type FailedOp = { op: Op; message: string; at: string };
 
 type Cache = {
   cards: Card[];
@@ -13,19 +16,26 @@ type Cache = {
   cycle: Cycle | null;
   spends: Spend[];
   settings: Settings | null;
-  goals?: Omit<StoreGoal, "balance">[];
+  goals?: Omit<StoreGoal, "balance" | "owed" | "available">[];
   planItems?: StorePlanItem[];
+  settlements?: StoreSettlement[];
   /** goal id → money moved by planned/unplanned spends still waiting to sync */
   pendingGoalDelta?: Record<string, number>;
   /** owed spends from before this cycle (current-cycle ones are in `spends`) */
   olderOwed?: Spend[];
 };
 
-type Ctx = Omit<Cache, "goals" | "planItems" | "pendingGoalDelta" | "olderOwed"> & {
+type Ctx = Omit<Cache, "goals" | "planItems" | "settlements" | "pendingGoalDelta" | "olderOwed"> & {
+  /** This cycle's card-bill / daily-result / leftover / borrow entries. */
+  settlements: StoreSettlement[];
   /** Planned/unplanned card spends waiting for their fund to pay (any date). */
   owedSpends: Spend[];
   /** Fund pays for it now (on paying the card bill). */
   settleSpends: (spends: Spend[]) => void;
+  /** Changes the server rejected: kept so nothing is silently lost. */
+  failed: FailedOp[];
+  retryFailed: () => void;
+  discardFailed: () => void;
   goals: StoreGoal[];
   /** Current cycle's plan. */
   planItems: StorePlanItem[];
@@ -40,7 +50,7 @@ type Ctx = Omit<Cache, "goals" | "planItems" | "pendingGoalDelta" | "olderOwed">
   updateSpend: (id: string, patch: Partial<Omit<Spend, "id" | "created_at">>) => void;
   deleteSpend: (id: string) => Spend | undefined;
   restoreSpend: (s: Spend) => void;
-  /** Re-fetch cards, categories, cycle, settings and spends (after edits elsewhere). */
+  /** Re-fetch the store and every cached screen query (call after any write). */
   reload: () => Promise<void>;
 };
 
@@ -96,13 +106,16 @@ function overlay(spends: Spend[], ops: Op[]): Spend[] {
 
 // PostgREST can return numeric columns as strings; normalise them.
 type Row = Record<string, unknown>;
-const NUMERIC = ["monthly_cap", "amount", "salary", "daily_budget", "planned", "actual", "target", "monthly_contribution", "opening_balance"];
+const NUMERIC = ["monthly_cap", "amount", "salary", "daily_budget", "planned", "actual", "target", "monthly_contribution", "opening_balance", "balance"];
 const num = <T,>(r: Row): T =>
   Object.fromEntries(Object.entries(r).map(([k, v]) => [k, NUMERIC.includes(k) && v != null ? Number(v) : v])) as T;
 
 export function StoreProvider({ userId, children }: { userId: string; children: React.ReactNode }) {
   const cacheKey = `spends:v1:${userId}`;
   const outboxKey = `spends:outbox:${userId}`;
+  const failedKey = `spends:failed:${userId}`;
+  // Read on first client render; screens only show it after the store is ready, so no hydration mismatch.
+  const [failed, setFailed] = useState<FailedOp[]>(() => (typeof window === "undefined" ? [] : read<FailedOp[]>(failedKey, [])));
 
   const [data, setData] = useState<Cache>({ cards: [], categories: [], cycle: null, spends: [], settings: null });
   const [ready, setReady] = useState(false);
@@ -114,6 +127,7 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
   const outbox = useRef<Op[]>([]);
   const flushing = useRef(false);
   const loadRef = useRef<() => Promise<void>>(async () => {});
+  const queryClient = useQueryClient();
 
   const publish = useCallback(
     (patch?: Partial<Cache>) => {
@@ -144,7 +158,16 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
             : await sb.from("spends").delete().eq("id", op.id);
         // Errors with a code come from Postgres/PostgREST (a real rejection); anything else is the network.
         if (err && !("code" in err && err.code)) break;
-        if (err) setError(err.message);
+        if (err) {
+          // A real rejection: park it for retry/discard instead of dropping it.
+          const entry: FailedOp = { op, message: err.message, at: new Date().toISOString() };
+          setFailed((f) => {
+            const next = [...f, entry];
+            write(failedKey, next);
+            return next;
+          });
+          reportError("sync", err.message, JSON.stringify(op).slice(0, 1000));
+        }
         outbox.current.shift();
         saveOutbox();
         synced++;
@@ -157,9 +180,9 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
     } finally {
       flushing.current = false;
       publish();
-      if (synced) void loadRef.current();
+      if (synced) void loadRef.current().then(() => queryClient.invalidateQueries());
     }
-  }, [publish, saveOutbox]);
+  }, [publish, saveOutbox, queryClient, failedKey]);
 
   const load = useCallback(async () => {
     if (!navigator.onLine) return;
@@ -171,8 +194,8 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
           sb.from("categories").select("*").order("sort_order"),
           sb.from("cycles").select("*").is("ends_on", null).order("starts_on", { ascending: false }).limit(1),
           sb.from("settings").select("birthday, birthday_card_id").maybeSingle(),
-          sb.from("goals").select("id, name, kind, is_custom, target, opening_balance, monthly_contribution, cycle_months, next_due_date"),
-          sb.from("goal_transactions").select("goal_id, amount"),
+          sb.from("goals").select("id, name, kind, role, is_custom, target, monthly_contribution, cycle_months, next_due_date"),
+          sb.from("goal_balances").select("goal_id, balance"),
         ]);
       let [c, k, y, st, g, tx] = await fetchMeta();
       if (c.error || k.error || y.error) throw c.error ?? k.error ?? y.error;
@@ -189,20 +212,19 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
       if (sp.error) throw sp.error;
       base.current = (sp.data ?? []).map((r: Row) => num<Spend>(r));
 
-      const txSum = new Map<string, number>();
-      ((tx.data ?? []) as { goal_id: string; amount: unknown }[]).forEach((t) =>
-        txSum.set(t.goal_id, (txSum.get(t.goal_id) ?? 0) + Number(t.amount)),
-      );
+      const balances = new Map(((tx.data ?? []) as { goal_id: string; balance: unknown }[]).map((b) => [b.goal_id, Number(b.balance)]));
       const goals = ((g.data ?? []) as Row[]).map((r) => {
-        const row = num<Omit<StoreGoal, "balance" | "serverBalance"> & { opening_balance: number }>(r);
-        const { opening_balance, ...rest } = row;
-        return { ...rest, serverBalance: Number(opening_balance ?? 0) + (txSum.get(row.id) ?? 0) };
+        const row = num<Omit<StoreGoal, "balance" | "serverBalance" | "owed" | "available">>(r);
+        return { ...row, serverBalance: balances.get(row.id) ?? 0 };
       });
       const owedOld = cycle
         ? await sb.from("spends").select("*").eq("fund_settle", "bill").lt("spent_on", cycle.starts_on)
         : { data: [], error: null };
       const pi = cycle
-        ? await sb.from("plan_items").select("id, name, kind, goal_id, planned, actual, done").eq("cycle_id", cycle.id)
+        ? await sb.from("plan_items").select("id, name, kind, goal_id, loan_id, planned, actual, done").eq("cycle_id", cycle.id)
+        : { data: [], error: null };
+      const st2 = cycle
+        ? await sb.from("cycle_settlements").select("id, kind, goal_id, loan_id, amount, done, note").eq("cycle_id", cycle.id).order("created_at")
         : { data: [], error: null };
       setError(null);
       publish({
@@ -213,6 +235,7 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
         goals,
         planItems: ((pi.data ?? []) as Row[]).map((r) => num<StorePlanItem>(r)),
         olderOwed: ((owedOld.data ?? []) as Row[]).map((r) => num<Spend>(r)),
+        settlements: ((st2.data ?? []) as Row[]).map((r) => num<StoreSettlement>(r)),
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load data");
@@ -289,6 +312,22 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
 
   const restoreSpend: Ctx["restoreSpend"] = useCallback((s) => enqueue({ kind: "upsert", spend: s }), [enqueue]);
 
+  const retryFailed = useCallback(() => {
+    const ops = failed.map((f) => f.op);
+    setFailed([]);
+    write(failedKey, []);
+    ops.forEach((op) => enqueue(op));
+  }, [failed, failedKey, enqueue]);
+
+  const discardFailed = useCallback(() => {
+    setFailed([]);
+    write(failedKey, []);
+  }, [failedKey]);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([load(), queryClient.invalidateQueries()]);
+  }, [load, queryClient]);
+
   const dailySpends = useMemo(() => data.spends.filter(isDaily), [data.spends]);
 
   const summary = useMemo(
@@ -328,7 +367,11 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
       goals,
       owedSpends,
       settleSpends,
+      failed,
+      retryFailed,
+      discardFailed,
       planItems: data.planItems ?? [],
+      settlements: data.settlements ?? [],
       dailySpends,
       ready,
       today,
@@ -339,9 +382,9 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
       updateSpend,
       deleteSpend,
       restoreSpend,
-      reload: load,
+      reload: refreshAll,
     }),
-    [data, goals, owedSpends, settleSpends, dailySpends, ready, today, pending, error, summary, addSpend, updateSpend, deleteSpend, restoreSpend, load],
+    [data, goals, owedSpends, settleSpends, failed, retryFailed, discardFailed, dailySpends, ready, today, pending, error, summary, addSpend, updateSpend, deleteSpend, restoreSpend, refreshAll],
   );
 
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;

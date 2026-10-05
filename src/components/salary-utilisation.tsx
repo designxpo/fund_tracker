@@ -16,13 +16,13 @@ const COLORS: Record<string, string> = {
 
 /** Where this cycle's salary is going, and what was spent through each payment mode. */
 export function SalaryUtilisation() {
-  const { cycle, summary, planItems, spends, cards } = useStore();
+  const { cycle, summary, planItems, settlements, spends, cards } = useStore();
   if (!cycle || !summary) return null;
 
   const salary = Number(cycle.salary);
   const days = diffDays(summary.cycle.start, summary.cycle.end) + 1;
   const reserve = Number(cycle.daily_budget) * days;
-  const util = salaryUtilisation(salary, reserve, summary.cycle.spent, planItems as MonthItem[]);
+  const util = salaryUtilisation(salary, reserve, summary.cycle.spent, planItems as MonthItem[], settlements);
   const pct = (n: number) => (salary > 0 ? (n / salary) * 100 : 0);
 
   // Every spend this cycle, whatever the type, grouped by how it was paid.
