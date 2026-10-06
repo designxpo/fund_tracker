@@ -100,7 +100,7 @@ export default function GoalsPage() {
       setForm(null);
       setAmount("");
       setNote("");
-      await reload();
+      void reload();
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Couldn't save" });
     }
@@ -137,7 +137,7 @@ export default function GoalsPage() {
                 const now = r.readyBy === addMonths(planner.data!.inputs.start, -1);
                 const late = g.target_date && (!r.readyBy || r.readyBy > g.target_date.slice(0, 7));
                 return (
-                  <Link key={g.id} href={`/goals/${g.id}`} className="flex items-center gap-3 rounded-2xl bg-surface p-3 shadow-sm">
+                  <Link key={g.id} href={`/goals/goal?id=${g.id}`} className="flex items-center gap-3 rounded-2xl bg-surface p-3 shadow-sm">
                     <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-bg text-xl">{g.icon ?? "🎯"}</span>
                     <span className="min-w-0 flex-1">
                       <span className="flex justify-between gap-2">

@@ -87,7 +87,7 @@ export default function IncomePage() {
       setRecurring(false);
       setSplit(null);
       setRemember(false);
-      await reload();
+      void reload();
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Couldn't save" });
     } finally {
@@ -99,7 +99,7 @@ export default function IncomePage() {
     if (!confirm("Delete this income? Money it moved into goals is taken back out.")) return;
     try {
       ok(await sb.from("income").delete().eq("id", id));
-      await reload();
+      void reload();
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Couldn't delete" });
     }

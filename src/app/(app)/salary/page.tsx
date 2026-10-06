@@ -16,7 +16,7 @@ import { CardBillStep } from "@/components/salary/card-bill-step";
 import { DailyResultRow, MoveRow, PlanRow } from "@/components/salary/rows";
 
 export default function SalaryPage() {
-  const { cycle, cards, today, reload, ready, goals, planItems, settlements } = useStore();
+  const { cycle, cards, today, reload, ready, goals, planItems, settlements, patchLocal } = useStore();
   const toast = useToast();
   const sb = createClient();
   const [rolling, setRolling] = useState(false);
@@ -59,14 +59,19 @@ export default function SalaryPage() {
   const planSteps = [...new Set(planItems.map((i) => stepOf(i, goals)))];
   const steps = [1, ...planSteps, ...(dailyResults.length ? [10] : []), ...(moves.length ? [11] : [])].sort((a, b) => a - b);
 
-  /** Run a database function, then refresh everything that shows money. */
-  async function act(fn: () => Promise<unknown>, msg?: string) {
+  /**
+   * Show the change immediately (optional), run the database function, confirm, then refresh
+   * balances in the background. On failure the refresh puts the screen back to the truth.
+   */
+  async function act(fn: () => Promise<unknown>, msg?: string, optimistic?: () => void) {
+    optimistic?.();
     try {
       await fn();
-      await reload();
       if (msg) toast({ msg });
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Something went wrong" });
+    } finally {
+      void reload();
     }
   }
 
@@ -181,7 +186,7 @@ export default function SalaryPage() {
               prev={data.prev}
               prevSpends={data.prevSpends}
               bill={bill}
-              onPaid={(done) => act(() => rpc("set_settlement", { p_id: bill!.id, p_done: done }))}
+              onPaid={(done) => act(() => rpc("set_settlement", { p_id: bill!.id, p_done: done }), undefined, () => patchLocal("settlements", bill!.id, { done }))}
             />
           )}
 
@@ -199,10 +204,15 @@ export default function SalaryPage() {
                       act(
                         () => rpc("set_plan_item", { p_item: i.id, p_done: done }),
                         done && i.kind === "prepayment" ? "Ask your lender to reduce tenure, not EMI." : undefined,
+                        () => patchLocal("planItems", i.id, { done, ...(done && i.actual == null ? { actual: i.planned } : {}) }),
                       )
                     }
                     onActual={(v) =>
-                      act(() => rpc("set_plan_item", v === null ? { p_item: i.id, p_clear_actual: true } : { p_item: i.id, p_actual: v }))
+                      act(
+                        () => rpc("set_plan_item", v === null ? { p_item: i.id, p_clear_actual: true } : { p_item: i.id, p_actual: v }),
+                        undefined,
+                        () => patchLocal("planItems", i.id, { actual: v }),
+                      )
                     }
                   />
                 ))}
@@ -212,8 +222,12 @@ export default function SalaryPage() {
                   key={s.id}
                   s={s}
                   goals={goals}
-                  onGoal={(goalId) => act(() => rpc("set_settlement", { p_id: s.id, p_goal: goalId || null, p_set_goal: true }))}
-                  onToggle={(done) => act(() => rpc("set_settlement", { p_id: s.id, p_done: done }))}
+                  onGoal={(goalId) =>
+                    act(() => rpc("set_settlement", { p_id: s.id, p_goal: goalId || null, p_set_goal: true }), undefined, () =>
+                      patchLocal("settlements", s.id, { goal_id: goalId || null }),
+                    )
+                  }
+                  onToggle={(done) => act(() => rpc("set_settlement", { p_id: s.id, p_done: done }), undefined, () => patchLocal("settlements", s.id, { done }))}
                 />
               ))}
             {step === 11 &&

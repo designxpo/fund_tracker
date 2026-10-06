@@ -27,7 +27,7 @@ export function RecentErrors() {
       <button
         onClick={async () => {
           await sb.from("client_errors").delete().not("id", "is", null);
-          await reload();
+          void reload();
         }}
         className="h-9 text-xs text-muted underline"
       >

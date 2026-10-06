@@ -242,7 +242,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
         p_item: item === "emergency" ? null : item.id,
         p_goal: item === "emergency" ? emergency!.id : null,
       });
-      await reload();
+      void reload();
       commit();
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Couldn't move the money" });

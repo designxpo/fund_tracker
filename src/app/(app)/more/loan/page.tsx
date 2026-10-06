@@ -96,7 +96,7 @@ export default function LoanPage() {
       ok(await sb.from("loan").update(patch).eq("id", loan.id));
       setEdit({});
       toast({ msg: "Loan details saved" });
-      await reload();
+      void reload();
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Couldn't save" });
     }
@@ -109,7 +109,7 @@ export default function LoanPage() {
       ok(await sb.from("loan_prepayments").insert({ loan_id: loan.id, amount: v, paid_on: pDate }));
       setPAmt("");
       setReminder(true);
-      await reload();
+      void reload();
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Couldn't save" });
     }
@@ -232,7 +232,7 @@ export default function LoanPage() {
                   aria-label="Delete prepayment"
                   onClick={async () => {
                     ok(await sb.from("loan_prepayments").delete().eq("id", p.id));
-                    await reload();
+                    void reload();
                   }}
                   className="h-9 w-9 text-muted"
                 >

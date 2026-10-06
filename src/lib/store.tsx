@@ -32,6 +32,8 @@ type Ctx = Omit<Cache, "goals" | "planItems" | "settlements" | "pendingGoalDelta
   owedSpends: Spend[];
   /** Fund pays for it now (on paying the card bill). */
   settleSpends: (spends: Spend[]) => void;
+  /** Show a change on screen immediately (the server call and background refresh follow). */
+  patchLocal: (table: "planItems" | "settlements", id: string, patch: Record<string, unknown>) => void;
   /** Changes the server rejected: kept so nothing is silently lost. */
   failed: FailedOp[];
   retryFailed: () => void;
@@ -206,9 +208,16 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
         [c, k, y, st, g, tx] = await fetchMeta();
       }
       const cycle = y.data?.[0] ? (num<Cycle>(y.data[0])) : null;
-      const sp = cycle
-        ? await sb.from("spends").select("*").gte("spent_on", cycle.starts_on).order("created_at", { ascending: false }).limit(5000)
-        : { data: [], error: null };
+      // Everything that depends on the cycle, fetched in parallel (one round trip instead of four).
+      const none = { data: [] as Row[], error: null };
+      const [sp, owedOld, pi, st2] = cycle
+        ? await Promise.all([
+            sb.from("spends").select("*").gte("spent_on", cycle.starts_on).order("created_at", { ascending: false }).limit(5000),
+            sb.from("spends").select("*").eq("fund_settle", "bill").lt("spent_on", cycle.starts_on),
+            sb.from("plan_items").select("id, name, kind, goal_id, loan_id, planned, actual, done").eq("cycle_id", cycle.id),
+            sb.from("cycle_settlements").select("id, kind, goal_id, loan_id, amount, done, note").eq("cycle_id", cycle.id).order("created_at"),
+          ])
+        : [none, none, none, none];
       if (sp.error) throw sp.error;
       base.current = (sp.data ?? []).map((r: Row) => num<Spend>(r));
 
@@ -217,15 +226,6 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
         const row = num<Omit<StoreGoal, "balance" | "serverBalance" | "owed" | "available">>(r);
         return { ...row, serverBalance: balances.get(row.id) ?? 0 };
       });
-      const owedOld = cycle
-        ? await sb.from("spends").select("*").eq("fund_settle", "bill").lt("spent_on", cycle.starts_on)
-        : { data: [], error: null };
-      const pi = cycle
-        ? await sb.from("plan_items").select("id, name, kind, goal_id, loan_id, planned, actual, done").eq("cycle_id", cycle.id)
-        : { data: [], error: null };
-      const st2 = cycle
-        ? await sb.from("cycle_settlements").select("id, kind, goal_id, loan_id, amount, done, note").eq("cycle_id", cycle.id).order("created_at")
-        : { data: [], error: null };
       setError(null);
       publish({
         cards: (c.data ?? []).map((r: Row) => num<Card>(r)),
@@ -312,6 +312,13 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
 
   const restoreSpend: Ctx["restoreSpend"] = useCallback((s) => enqueue({ kind: "upsert", spend: s }), [enqueue]);
 
+  const patchLocal: Ctx["patchLocal"] = useCallback((table, id, patch) => {
+    setData((d) => ({
+      ...d,
+      [table]: ((d[table] ?? []) as { id: string }[]).map((r) => (r.id === id ? { ...r, ...patch } : r)),
+    }));
+  }, []);
+
   const retryFailed = useCallback(() => {
     const ops = failed.map((f) => f.op);
     setFailed([]);
@@ -368,6 +375,7 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
       owedSpends,
       settleSpends,
       failed,
+      patchLocal,
       retryFailed,
       discardFailed,
       planItems: data.planItems ?? [],
@@ -384,7 +392,7 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
       restoreSpend,
       reload: refreshAll,
     }),
-    [data, goals, owedSpends, settleSpends, failed, retryFailed, discardFailed, dailySpends, ready, today, pending, error, summary, addSpend, updateSpend, deleteSpend, restoreSpend, refreshAll],
+    [data, goals, owedSpends, settleSpends, failed, patchLocal, retryFailed, discardFailed, dailySpends, ready, today, pending, error, summary, addSpend, updateSpend, deleteSpend, restoreSpend, refreshAll],
   );
 
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;

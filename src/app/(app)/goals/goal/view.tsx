@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store";
@@ -16,8 +16,8 @@ import { inr } from "@/lib/money";
 const DAYS_PER_MONTH = 365 / 12;
 const LEVER_KINDS = new Set(["savings", "buffer", "prepayment"]);
 
-export default function GoalDetailPage() {
-  const { id } = useParams<{ id: string }>();
+export function GoalDetailView() {
+  const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
   const { cycle, today, ready, reload: reloadStore } = useStore();
   const toast = useToast();
@@ -96,7 +96,7 @@ export default function GoalDetailPage() {
   async function run(fn: () => Promise<void>, msg: string) {
     try {
       await fn();
-      await Promise.all([reload(), reloadStore()]);
+      void Promise.all([reload(), reloadStore()]);
       toast({ msg });
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Something went wrong" });
@@ -128,7 +128,7 @@ export default function GoalDetailPage() {
     if (!confirm(`Delete "${goal.name}"? Its savings history and plan line go too.`)) return;
     try {
       await rpc("delete_goal", { p_goal: goal.id });
-      await reloadStore();
+      void reloadStore();
       router.replace("/goals");
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Couldn't delete" });

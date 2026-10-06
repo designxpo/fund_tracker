@@ -128,7 +128,7 @@ export default function SettingsPage() {
     try {
       const { error } = await fn();
       if (error) throw new Error(error.message);
-      await Promise.all([reloadStore(), reload()]);
+      void Promise.all([reloadStore(), reload()]);
       toast({ msg });
     } catch (e) {
       toast({ msg: e instanceof Error ? e.message : "Couldn't save" });

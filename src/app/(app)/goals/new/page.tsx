@@ -34,7 +34,7 @@ export default function NewGoalPage() {
             .select("id")
             .single();
           if (error) return toast({ msg: error.message });
-          router.replace(`/goals/${data.id}`);
+          router.replace(`/goals/goal?id=${data.id}`);
         }}
       />
     </div>

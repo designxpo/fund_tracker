@@ -1,12 +1,7 @@
-import { redirect } from "next/navigation";
-import { AppShell } from "@/components/app-shell";
-import { createClient } from "@/lib/supabase/server";
-import { hasSupabaseEnv } from "@/lib/supabase/env";
+import { AuthGate } from "@/components/auth-gate";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  if (!hasSupabaseEnv) redirect("/login");
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  if (!data?.claims) redirect("/login");
-  return <AppShell userId={data.claims.sub}>{children}</AppShell>;
+// No server-side work here: every app screen is a static page (instant tab switches from the CDN);
+// the session is checked in the browser by AuthGate.
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return <AuthGate>{children}</AuthGate>;
 }
