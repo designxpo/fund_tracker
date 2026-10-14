@@ -117,15 +117,37 @@ do $$ declare e0 numeric; begin
   assert pg_temp.bal('emergency') = e0, 'income deleted: split reversed';
 end $$;
 
+-- Locked fund: money goes in, nothing comes out ------------------------------------------------------------
+do $$ declare g uuid; blocked boolean := false; begin
+  insert into goals (name, target, locked) values ('Cash reserve', 10000, true) returning id into g;
+  insert into goal_transactions (goal_id, amount, note) values (g, 10000, 'Cash set aside');
+  begin
+    insert into goal_transactions (goal_id, amount, note) values (g, -500, 'Oops');
+  exception when raise_exception then blocked := true;
+  end;
+  assert blocked, 'locked: withdrawal refused';
+  assert pg_temp.bal('Cash reserve') = 10000, 'locked: balance intact';
+  update goals set locked = false where id = g;
+  insert into goal_transactions (goal_id, amount, note) values (g, -500, 'Unlocked, used');
+  assert pg_temp.bal('Cash reserve') = 9500, 'unlocked: withdrawal allowed';
+end $$;
+
 -- Salary day ------------------------------------------------------------------------------------------------
 do $$ declare old_cyc uuid; nxt date; begin
   select id into old_cyc from cycles where ends_on is null;
   select (date_trunc('month', starts_on) + interval '1 month')::date into nxt from cycles where id = old_cyc;
+  insert into plan_months (month, daily_budget) values (nxt, 470);
   perform start_cycle(nxt, 50000);
   assert (select count(*) from cycles where ends_on is null) = 1, 'rollover: one open cycle';
   assert (select count(*) from cycle_settlements where cycle_id = (select id from cycles where ends_on is null) and kind in ('card_bills', 'daily_result')) = 2,
     'rollover: card bills + daily result settlements';
   assert (select count(*) from plan_items where cycle_id = (select id from cycles where ends_on is null)) > 0, 'rollover: plan copied';
+  assert (select daily_budget from cycles where ends_on is null) = 470, 'rollover: month daily budget used';
+
+  -- the month budget carries on, and a manual change in Settings is kept the month after
+  update cycles set daily_budget = 480 where ends_on is null;
+  perform start_cycle((nxt + interval '1 month')::date, 50000);
+  assert (select daily_budget from cycles where ends_on is null) = 480, 'rollover: current daily budget carries on';
 end $$;
 
 select 'ALL DATABASE TESTS PASSED' as result;

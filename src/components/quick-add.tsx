@@ -252,7 +252,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   }
 
   const coverOptions = planItems
-    .filter((i) => (i.kind === "savings" || i.kind === "prepayment") && i.goal_id !== emergency?.id)
+    .filter((i) => (i.kind === "savings" || i.kind === "prepayment") && i.goal_id !== emergency?.id && !goals.find((g) => g.id === i.goal_id)?.locked)
     .map((i) => ({ item: i, available: i.done ? (i.actual ?? i.planned) : i.planned }))
     .filter((o) => o.available > 0)
     // Trip fund first, then loan prepayment, then other savings; biggest first within each.

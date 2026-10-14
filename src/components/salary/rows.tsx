@@ -81,11 +81,13 @@ export function DailyResultRow({
             className="mt-1 h-9 w-full rounded-lg border border-line bg-white/80 px-2 text-sm text-ink"
           >
             <option value="">{negative ? "Borrow from…" : "Move to…"}</option>
-            {goals.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name} ({inr(Math.round(g.available))} free)
-              </option>
-            ))}
+            {goals
+              .filter((g) => !negative || !g.locked)
+              .map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name} ({inr(Math.round(g.available))} free)
+                </option>
+              ))}
           </select>
         )}
       </span>

@@ -50,6 +50,8 @@ export type StoreGoal = {
   kind: GoalKind;
   role: GoalRole | null;
   is_custom: boolean;
+  /** money set aside that is never spent or borrowed from (e.g. cash at home) */
+  locked: boolean;
   target: number | null;
   monthly_contribution: number | null;
   cycle_months: number | null;

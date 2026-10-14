@@ -25,7 +25,7 @@ export type Split = { goal_id: string; pct: number }[];
 
 /** Everything the planner screens need, plus a ready-made `inputs` for `simulate`. */
 export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: string) {
-  const [goals, txs, items, tplRows, loans, income, settings] = await Promise.all([
+  const [goals, txs, items, tplRows, loans, income, settings, monthRows] = await Promise.all([
     sb.from("goals").select("*").then(ok),
     sb.from("goal_transactions").select("goal_id, amount").then(ok),
     sb.from("plan_items").select("id, name, kind, planned, goal_id, loan_id").eq("cycle_id", cycle.id).then(ok),
@@ -33,6 +33,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
     sb.from("loan").select("*").limit(1).then(ok),
     sb.from("income").select("*").order("received_on", { ascending: false }).limit(200).then(ok),
     sb.from("settings").select("income_split").maybeSingle().then(ok),
+    sb.from("plan_months").select("month, daily_budget").then((r: { data: unknown[] | null }) => r.data ?? []), // optional: none before the migration
   ]);
 
   const txSum = new Map<string, number>();
@@ -107,6 +108,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
     cycleStart: cycle.starts_on,
     salary: Number(cycle.salary),
     dailyBudget: Number(cycle.daily_budget),
+    dailyBudgets: (monthRows as { month: string; daily_budget: number }[]).map((r) => ({ month: String(r.month).slice(0, 7), daily: Number(r.daily_budget) })),
     extraMonthly,
     lines,
     templates,

@@ -9,12 +9,15 @@ export type YM = string; // "YYYY-MM"
 export type PlanLine = { name: string; kind: string; planned: number; goal_id: string | null };
 /** A month's plan; applies from `month` until a later template takes over. */
 export type PlanTemplate = { month: YM; lines: PlanLine[] };
+/** A month's daily budget; applies from `month` until a later one takes over. */
+export type MonthBudget = { month: YM; daily: number };
 
 export type PlannerInputs = {
   start: YM;                    // first month to project (the next salary)
   cycleStart: string;           // current cycle start; only templates for later months are "scheduled"
   salary: number;
-  dailyBudget: number;
+  dailyBudget: number;          // the current cycle's
+  dailyBudgets?: MonthBudget[]; // month-specific daily budgets (from month plans)
   extraMonthly: number;         // recurring extra income
   lines: PlanLine[];            // the current cycle's plan
   templates: PlanTemplate[];
@@ -55,6 +58,15 @@ export function linesFor(ym: YM, inp: PlannerInputs): PlanLine[] {
   return t ? t.lines : inp.lines;
 }
 
+/** Daily budget in force in month `ym`: same rule as `linesFor` (and as salary day in the database). */
+export function dailyFor(ym: YM, inp: Pick<PlannerInputs, "cycleStart" | "dailyBudget" | "dailyBudgets">): number {
+  const cycleMonth = inp.cycleStart.slice(0, 7);
+  const b = (inp.dailyBudgets ?? [])
+    .filter((x) => x.month > cycleMonth && x.month <= ym)
+    .sort((a, b) => (a.month < b.month ? 1 : -1))[0];
+  return b ? b.daily : inp.dailyBudget;
+}
+
 export function lineAmount(line: PlanLine, ym: YM, inp: PlannerInputs): number {
   if (inp.loanFreeFrom && inp.loanLines.includes(line.name) && ym >= inp.loanFreeFrom) return 0;
   return line.planned;
@@ -67,7 +79,7 @@ export function commitments(ym: YM, inp: PlannerInputs) {
 }
 
 export function freeMoney(ym: YM, inp: PlannerInputs) {
-  return inp.salary + inp.extraMonthly - inp.dailyBudget * DAYS_PER_MONTH - commitments(ym, inp);
+  return inp.salary + inp.extraMonthly - dailyFor(ym, inp) * DAYS_PER_MONTH - commitments(ym, inp);
 }
 
 export function simulate(inp: PlannerInputs, goals: PlannerGoal[]): Record<string, GoalResult> {

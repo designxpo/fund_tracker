@@ -22,7 +22,7 @@ const ROLE_ORDER = ["emergency", "trip", "long_term", "buffer"];
 type Tx = { id: string; goal_id: string; amount: number; note: string | null; happened_on: string };
 
 export default function GoalsPage() {
-  const { cycle, today, ready, goals: storeGoals } = useStore();
+  const { cycle, today, ready, goals: storeGoals, reload: reloadStore } = useStore();
   const toast = useToast();
   const sb = createClient();
   const [form, setForm] = useState<{ goal: Goal; kind: "deposit" | "withdraw" } | null>(null);
@@ -52,7 +52,9 @@ export default function GoalsPage() {
   const { goals, txs, items, templates } = data;
 
   const roleOf = (g: Goal) => (g as Goal & { role?: string | null }).role ?? "";
-  const sorted = goals.filter((g) => !(g as Goal & { is_custom?: boolean }).is_custom && (g as Goal).kind !== "sinking").sort((a, b) => ROLE_ORDER.indexOf(roleOf(a)) - ROLE_ORDER.indexOf(roleOf(b)));
+  // Built-in funds in their usual order, then extra funds (e.g. a locked cash reserve).
+  const rankOf = (g: Goal) => (ROLE_ORDER.includes(roleOf(g)) ? ROLE_ORDER.indexOf(roleOf(g)) : ROLE_ORDER.length);
+  const sorted = goals.filter((g) => !(g as Goal & { is_custom?: boolean }).is_custom && (g as Goal).kind !== "sinking").sort((a, b) => rankOf(a) - rankOf(b));
   const balanceOf = (g: Goal) => g.opening_balance + txs.filter((t) => t.goal_id === g.id).reduce((s, t) => s + t.amount, 0);
 
   // Monthly contribution uses the latest upcoming month's plan if there is one (e.g. the Dec-2026 step-up).
@@ -78,6 +80,17 @@ export default function GoalsPage() {
     d.setMonth(d.getMonth() + Math.ceil(left / m));
     return `Est. ${d.toLocaleDateString("en-IN", { month: "short", year: "numeric" })}`;
   };
+
+  async function setLocked(g: Goal, locked: boolean) {
+    if (!locked && !confirm(`Unlock ${g.name}? It can then be spent or borrowed from.`)) return;
+    try {
+      ok(await sb.from("goals").update({ locked }).eq("id", g.id));
+      toast({ msg: locked ? `${g.name} locked` : `${g.name} unlocked` });
+      void Promise.all([reload(), reloadStore()]);
+    } catch (e) {
+      toast({ msg: e instanceof Error ? e.message : "Couldn't save" });
+    }
+  }
 
   async function submit() {
     if (!form) return;
@@ -220,10 +233,12 @@ export default function GoalsPage() {
         return (
           <section key={g.id} className="rounded-2xl bg-surface p-4 shadow-sm">
             <div className="flex items-center gap-3">
-              <span className="grid h-11 w-11 place-items-center rounded-xl bg-bg text-xl">{ROLE_ICON[roleOf(g)] ?? "🎯"}</span>
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-bg text-xl">{g.locked ? "🔒" : (ROLE_ICON[roleOf(g)] ?? "🎯")}</span>
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">{g.name}</p>
-                <p className="text-xs text-muted">{g.target ? `Target ${inr(g.target)}` : "No target"}{est ? ` · ${est}` : ""}</p>
+                <p className="text-xs text-muted">
+                  {g.locked ? "Locked · never spent or borrowed from" : `${g.target ? `Target ${inr(g.target)}` : "No target"}${est ? ` · ${est}` : ""}`}
+                </p>
               </div>
               <p className="text-lg font-bold tabular-nums">{inr(bal)}</p>
             </div>
@@ -239,9 +254,14 @@ export default function GoalsPage() {
               <button onClick={() => setForm({ goal: g, kind: "deposit" })} className="h-11 flex-1 rounded-xl bg-navy text-sm font-semibold text-white">
                 Add
               </button>
-              {WITHDRAWABLE.has(roleOf(g)) && (
+              {(WITHDRAWABLE.has(roleOf(g)) || (!roleOf(g) && !g.locked)) && (
                 <button onClick={() => setForm({ goal: g, kind: "withdraw" })} className="h-11 flex-1 rounded-xl border border-line text-sm font-medium">
                   Withdraw
+                </button>
+              )}
+              {!roleOf(g) && (
+                <button onClick={() => setLocked(g, !g.locked)} className="h-11 rounded-xl px-3 text-sm text-muted">
+                  {g.locked ? "Unlock" : "Lock"}
                 </button>
               )}
               <button onClick={() => setOpen(open === g.id ? null : g.id)} className="h-11 rounded-xl px-3 text-sm text-muted">

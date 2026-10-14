@@ -196,7 +196,7 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
           sb.from("categories").select("*").order("sort_order"),
           sb.from("cycles").select("*").is("ends_on", null).order("starts_on", { ascending: false }).limit(1),
           sb.from("settings").select("birthday, birthday_card_id").maybeSingle(),
-          sb.from("goals").select("id, name, kind, role, is_custom, target, monthly_contribution, cycle_months, next_due_date"),
+          sb.from("goals").select("*"),
           sb.from("goal_balances").select("goal_id, balance"),
         ]);
       let [c, k, y, st, g, tx] = await fetchMeta();
@@ -224,7 +224,7 @@ export function StoreProvider({ userId, children }: { userId: string; children: 
       const balances = new Map(((tx.data ?? []) as { goal_id: string; balance: unknown }[]).map((b) => [b.goal_id, Number(b.balance)]));
       const goals = ((g.data ?? []) as Row[]).map((r) => {
         const row = num<Omit<StoreGoal, "balance" | "serverBalance" | "owed" | "available">>(r);
-        return { ...row, serverBalance: balances.get(row.id) ?? 0 };
+        return { ...row, locked: row.locked === true, serverBalance: balances.get(row.id) ?? 0 };
       });
       setError(null);
       publish({

@@ -28,9 +28,9 @@ export function MonthCard({
   const diff = month.result;
   const saved = month.variances.filter((v) => v.diff < 0);
   const over = month.variances.filter((v) => v.diff > 0);
-  // Borrow only from goals that have the money; the emergency fund goes last.
+  // Borrow only from goals that have the money (never a locked one); the emergency fund goes last.
   const sources = goals
-    .filter((g) => g.available >= Math.abs(diff))
+    .filter((g) => !g.locked && g.available >= Math.abs(diff))
     .sort((a, b) => (a.role === "emergency" ? 1 : b.role === "emergency" ? -1 : b.available - a.available));
 
   return (

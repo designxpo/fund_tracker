@@ -10,7 +10,7 @@ import { download, toCsv } from "@/lib/csv";
 import { RecentErrors } from "@/components/recent-errors";
 import { normalizePlan, type Goal, type PlanItem } from "@/lib/plan";
 import { cycleEnd, diffDays } from "@/lib/budget";
-import { addMonths, ymLabel } from "@/lib/planner";
+import { addMonths, dailyFor, ymLabel } from "@/lib/planner";
 import { inr } from "@/lib/money";
 
 function Field({
@@ -106,10 +106,11 @@ export default function SettingsPage() {
 
   const { data, reload } = useData("settings", async () => {
     if (!cycle) return null;
-    const [items, goals, templates] = await Promise.all([
+    const [items, goals, templates, monthRows] = await Promise.all([
       sb.from("plan_items").select("*").eq("cycle_id", cycle.id).not("kind", "in", "(bills,unspent,adjustment)").order("kind").order("name").then(ok),
       sb.from("goals").select("*").order("name").then(ok),
       sb.from("plan_templates").select("*").order("month").order("sort_order").then(ok),
+      sb.from("plan_months").select("month, daily_budget").then((r: { data: unknown[] | null }) => r.data ?? []), // optional: none before the migration
     ]);
     return {
       items: (items as Record<string, unknown>[]).map(normalizePlan),
@@ -119,6 +120,7 @@ export default function SettingsPage() {
         monthly_contribution: g.monthly_contribution == null ? null : Number(g.monthly_contribution),
       })),
       templates: (templates as TemplateRow[]).map((t) => ({ ...t, month: String(t.month).slice(0, 7), planned: Number(t.planned) })),
+      dailyBudgets: (monthRows as { month: string; daily_budget: number }[]).map((r) => ({ month: String(r.month).slice(0, 7), daily: Number(r.daily_budget) })),
     };
   }, cycle?.id);
 
@@ -166,7 +168,7 @@ export default function SettingsPage() {
     toast({ msg: `Exported ${rows.length - 1} spends` });
   }
 
-  const { items, goals, templates } = data;
+  const { items, goals, templates, dailyBudgets } = data;
 
   // Month-specific plans: this cycle's plan, then each upcoming month's template.
   const cycleMonth = cycle.starts_on.slice(0, 7);
@@ -178,7 +180,8 @@ export default function SettingsPage() {
   const table = viewing === "current" ? "plan_items" : "plan_templates";
   const days = viewing === "current" ? diffDays(cycle.starts_on, cycleEnd(cycle.starts_on, cycle.ends_on)) + 1 : daysInMonth(viewing);
   const planSum = rowsShown.reduce((t, r) => t + r.planned, 0);
-  const dailyReserve = Number(cycle.daily_budget) * days;
+  const daily = viewing === "current" ? Number(cycle.daily_budget) : dailyFor(viewing, { cycleStart: cycle.starts_on, dailyBudget: Number(cycle.daily_budget), dailyBudgets });
+  const dailyReserve = daily * days;
   const gap = Number(cycle.salary) - (planSum + dailyReserve);
 
   async function addMonthPlan() {
@@ -277,7 +280,7 @@ export default function SettingsPage() {
 
       <Section
         title="Monthly plan"
-        hint="Each month can differ. On salary day the new cycle uses that month's plan; months without one copy the previous cycle. The last month's plan continues onward."
+        hint="Each month can differ, daily budget included. On salary day the new cycle uses that month's plan; months without one copy the previous cycle. The last month's plan continues onward."
       >
         <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
           {["current", ...months].map((m) => (
@@ -296,9 +299,20 @@ export default function SettingsPage() {
         </div>
 
         <p role="status" className={`rounded-xl px-3 py-2 text-xs ${Math.abs(gap) < 0.5 ? "bg-good/12 text-good" : "bg-warn/15 text-warn"}`}>
-          Plan {inr(planSum)} + daily {inr(dailyReserve)} (₹{Number(cycle.daily_budget)} × {days} days) = {inr(planSum + dailyReserve)}.{" "}
+          Plan {inr(planSum)} + daily {inr(dailyReserve)} (₹{daily} × {days} days) = {inr(planSum + dailyReserve)}.{" "}
           {Math.abs(gap) < 0.5 ? "Matches your salary ✓" : gap > 0 ? `${inr(gap)} short of ${inr(Number(cycle.salary))}.` : `${inr(-gap)} over ${inr(Number(cycle.salary))}.`}
         </p>
+
+        {viewing !== "current" && (
+          <Field
+            label={`Daily budget from ${ymLabel(viewing)} (₹/day)`}
+            numeric
+            value={daily}
+            onCommit={(v) =>
+              save(() => sb.from("plan_months").upsert({ month: `${viewing}-01`, daily_budget: Number(v || 0) }, { onConflict: "user_id,month" }), "Daily budget saved")
+            }
+          />
+        )}
 
         <ul className="divide-y divide-line">
           {rowsShown.map((i) => (
@@ -357,7 +371,11 @@ export default function SettingsPage() {
           <button
             onClick={() =>
               confirm(`Delete the ${ymLabel(viewing)} plan? That month will copy the previous cycle instead.`) &&
-              save(() => sb.from("plan_templates").delete().eq("month", `${viewing}-01`), "Month plan deleted").then(() => setPlanMonth("current"))
+              save(async () => {
+                const r = await sb.from("plan_templates").delete().eq("month", `${viewing}-01`);
+                if (!r.error) await sb.from("plan_months").delete().eq("month", `${viewing}-01`); // its daily budget goes too
+                return r;
+              }, "Month plan deleted").then(() => setPlanMonth("current"))
             }
             className="h-9 text-xs text-bad"
           >

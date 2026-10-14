@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { simulate, freeMoney, emiFor, recurringExtra, addMonths, type PlannerInputs } from "./planner.ts";
+import { simulate, freeMoney, emiFor, recurringExtra, addMonths, dailyFor, type PlannerInputs } from "./planner.ts";
 
 // Example persona: commitments 42,000 + ₹500/day on a 58,000 salary leaves ~₹792 free.
 const lines = [
@@ -33,6 +33,15 @@ test("free money follows scheduled changes and loan close", () => {
   assert.equal(Math.round(freeMoney("2026-11", base)), Math.round(58000 - daily - 42000));
   assert.equal(Math.round(freeMoney("2026-12", base)), Math.round(58000 - daily - 41000)); // -5000 EMI +4000 prepay
   assert.equal(Math.round(freeMoney("2028-06", base)), Math.round(58000 - daily - 25000)); // loan lines gone
+});
+
+test("month daily budgets apply from their month onward, after the current cycle only", () => {
+  const inp = { ...base, dailyBudgets: [{ month: "2026-10", daily: 300 }, { month: "2026-11", daily: 470 }, { month: "2027-03", daily: 450 }] };
+  assert.equal(dailyFor("2026-10", inp), 500); // current cycle keeps its own
+  assert.equal(dailyFor("2026-11", inp), 470);
+  assert.equal(dailyFor("2027-02", inp), 470); // carries on
+  assert.equal(dailyFor("2027-03", inp), 450);
+  assert.equal(Math.round(freeMoney("2026-11", inp) - freeMoney("2026-11", base)), Math.round(30 * 365 / 12));
 });
 
 test("bills/unspent lines are not commitments", () => {

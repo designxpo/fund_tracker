@@ -16,6 +16,7 @@ export type Goal = {
   opening_balance: number;
   kind?: "savings" | "sinking" | "buffer";
   role?: "emergency" | "trip" | "buffer" | "long_term" | null;
+  locked?: boolean;
 };
 
 export const amountOf = (i: Pick<PlanItem, "planned" | "actual">) => Number(i.actual ?? i.planned);
@@ -24,7 +25,7 @@ export const amountOf = (i: Pick<PlanItem, "planned" | "actual">) => Number(i.ac
  * Salary-day checklist step. Steps 1 (card bills), 10 (daily-budget result) and 11 (leftover/borrowed)
  * come from cycle_settlements; plan lines map to 2–9.
  */
-export function stepOf(i: { kind: string; goal_id: string | null }, goals: Pick<Goal, "id" | "kind" | "role">[]): number {
+export function stepOf(i: { kind: string; goal_id: string | null }, goals: Pick<Goal, "id" | "kind" | "role" | "locked">[]): number {
   switch (i.kind) {
     case "loan": return 2;
     case "fixed": return 3;
@@ -33,7 +34,7 @@ export function stepOf(i: { kind: string; goal_id: string | null }, goals: Pick<
     default: {
       const g = goals.find((x) => x.id === i.goal_id);
       if (g?.kind === "sinking") return 4;
-      return g?.role === "emergency" ? 6 : g?.role === "trip" ? 7 : 8;
+      return g?.role === "emergency" || g?.locked ? 6 : g?.role === "trip" ? 7 : 8;
     }
   }
 }
@@ -44,7 +45,7 @@ export const STEP_TITLES: Record<number, string> = {
   3: "Fixed costs",
   4: "Sinking funds",
   5: "Surprise buffer → separate account",
-  6: "Emergency fund",
+  6: "Emergency money",
   7: "Trip fund",
   8: "Long-term investing",
   9: "Loan prepayment",

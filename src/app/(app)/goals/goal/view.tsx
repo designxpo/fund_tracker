@@ -84,7 +84,10 @@ export function GoalDetailView() {
       ...inputs,
       lines: leverPlan(data.lines, amount),
       templates: inputs.templates.map((t) => ({ ...t, lines: leverPlan(t.lines, amount) })),
-      dailyBudget: src === "daily" ? Math.max(0, inputs.dailyBudget - amount / DAYS_PER_MONTH) : inputs.dailyBudget,
+      ...(src === "daily" && {
+        dailyBudget: Math.max(0, inputs.dailyBudget - amount / DAYS_PER_MONTH),
+        dailyBudgets: inputs.dailyBudgets?.map((b) => ({ ...b, daily: Math.max(0, b.daily - amount / DAYS_PER_MONTH) })),
+      }),
     };
   };
   const lever = simulate(withLever(x, source), data.plannerGoals)[goal.id];
