@@ -38,7 +38,30 @@ export function monthSummary(salary: number, dailyReserve: number, items: MonthI
   };
 }
 
-export type UtilRow = { key: string; label: string; amount: number };
+/** Where a plan line goes: sinking funds and the Surprise buffer are money set aside to spend later. */
+export type Bucket = "emis" | "fixed" | "saved" | "setAside";
+export type GoalKindRef = { id: string; kind?: string | null };
+
+export function bucketOf(i: { kind: string; goal_id: string | null }, goals: GoalKindRef[] = []): Bucket {
+  if (i.kind === "loan" || i.kind === "prepayment") return "emis";
+  if (i.kind === "fixed") return "fixed";
+  if (i.kind === "buffer") return "setAside";
+  const g = goals.find((x) => x.id === i.goal_id);
+  return g?.kind === "sinking" || g?.kind === "buffer" ? "setAside" : "saved";
+}
+
+/** A leftover/borrow move counts in the bucket of where it went (no goal = loan prepayment). */
+const moveBucket = (s: MonthSettlement, goals: GoalKindRef[]) => (s.goal_id ? bucketOf({ kind: "savings", goal_id: s.goal_id }, goals) : "emis");
+
+export const BUCKET_LABELS: Record<Bucket | "daily", string> = {
+  emis: "EMIs & loan",
+  fixed: "Fixed costs",
+  saved: "Saved & invested",
+  setAside: "Set aside (funds & buffer)",
+  daily: "Daily spending",
+};
+
+export type UtilRow = { key: Bucket | "daily" | "dailyLeft"; label: string; amount: number };
 
 /** Where the salary is going this cycle, whatever the payment mode. */
 export function salaryUtilisation(
@@ -47,21 +70,59 @@ export function salaryUtilisation(
   dailySpent: number,
   items: MonthItem[],
   settlements: MonthSettlement[] = [],
+  goals: GoalKindRef[] = [],
 ) {
-  const sum = (f: (i: MonthItem) => boolean) => items.filter(f).reduce((t, i) => t + amountOf(i), 0);
-  const moved = (toGoal: boolean) =>
-    settlements.filter((s) => isMove(s) && !!s.goal_id === toGoal).reduce((t, s) => t + Number(s.amount), 0);
-  const emis = sum((i) => i.kind === "loan" || i.kind === "prepayment") + moved(false);
-  const fixed = sum((i) => i.kind === "fixed");
-  const saved = sum((i) => i.kind === "savings" || i.kind === "buffer") + moved(true);
-  const dailyLeft = Math.max(0, dailyReserve - dailySpent);
+  const total = (b: Bucket) =>
+    items.filter((i) => bucketOf(i, goals) === b).reduce((t, i) => t + amountOf(i), 0) +
+    settlements.filter((s) => isMove(s) && moveBucket(s, goals) === b).reduce((t, s) => t + Number(s.amount), 0);
   const rows: UtilRow[] = [
-    { key: "emis", label: "EMIs & loan", amount: emis },
-    { key: "fixed", label: "Fixed costs", amount: fixed },
-    { key: "saved", label: "Saved & invested", amount: saved },
+    ...(["emis", "fixed", "saved", "setAside"] as const).map((key) => ({ key, label: BUCKET_LABELS[key], amount: total(key) })),
     { key: "daily", label: "Daily spending so far", amount: dailySpent },
-    { key: "dailyLeft", label: "Daily budget still available", amount: dailyLeft },
+    { key: "dailyLeft", label: "Daily budget still available", amount: Math.max(0, dailyReserve - dailySpent) },
   ];
   const used = rows.reduce((t, r) => t + r.amount, 0);
-  return { rows, used, left: salary - used };
+  const by = (k: UtilRow["key"]) => rows.find((r) => r.key === k)!.amount;
+  return {
+    rows,
+    used,
+    left: salary - used,
+    /** money that has left for good: EMIs, fixed costs and daily spending */
+    spent: by("emis") + by("fixed") + by("daily"),
+    saved: by("saved"),
+    setAside: by("setAside"),
+  };
+}
+
+export type VarianceRow = {
+  key: Bucket | "daily";
+  label: string;
+  plan: number;
+  actual: number;
+  /** savings: more than plan is good; spending: less than plan is good */
+  moreIsBetter: boolean;
+};
+
+/**
+ * Plan vs actual per bucket. Plan lines compare what Salary Day planned with what was entered
+ * (leftover moves count as unplanned extra); daily spending compares against the budget up to today.
+ */
+export function planVsActual(
+  items: MonthItem[],
+  settlements: MonthSettlement[],
+  goals: GoalKindRef[],
+  daily: { budgetToDate: number; spent: number },
+): VarianceRow[] {
+  const rows: VarianceRow[] = (["emis", "fixed", "saved", "setAside"] as const).map((key) => {
+    const lines = items.filter((i) => bucketOf(i, goals) === key);
+    const moves = settlements.filter((s) => isMove(s) && moveBucket(s, goals) === key).reduce((t, s) => t + Number(s.amount), 0);
+    return {
+      key,
+      label: BUCKET_LABELS[key],
+      plan: lines.reduce((t, i) => t + Number(i.planned), 0),
+      actual: lines.reduce((t, i) => t + amountOf(i), 0) + moves,
+      moreIsBetter: key === "saved" || key === "setAside",
+    };
+  });
+  rows.push({ key: "daily", label: BUCKET_LABELS.daily, plan: daily.budgetToDate, actual: daily.spent, moreIsBetter: false });
+  return rows.filter((r) => r.plan !== 0 || r.actual !== 0);
 }

@@ -6,6 +6,7 @@ import { useQuickAdd } from "@/components/quick-add";
 import { useToast } from "@/components/toast";
 import { CardStrip } from "@/components/card-strip";
 import { OutsideBudget } from "@/components/outside-budget";
+import { SalarySnapshot } from "@/components/money-overview";
 import { SpendRow } from "@/components/spend-row";
 import Link from "next/link";
 import { billsDueSoon, ordinal, parseYmd, salaryPromptDue, sinkingDueSoon } from "@/lib/budget";
@@ -194,6 +195,8 @@ export default function HomePage() {
           </p>
         </section>
       </div>
+
+      <SalarySnapshot />
 
       <CardStrip />
 

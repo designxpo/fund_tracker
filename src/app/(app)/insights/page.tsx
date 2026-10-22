@@ -5,7 +5,8 @@ import { Bar, BarChart, Cell, Pie, PieChart, ReferenceLine, ResponsiveContainer,
 import { useStore } from "@/lib/store";
 import { addDays, capLevel, dailyOnly, diffDays, parseYmd } from "@/lib/budget";
 import { inr } from "@/lib/money";
-import { SalaryUtilisation } from "@/components/salary-utilisation";
+import { EveryRupee, PaidBy, PlanVsActual, SalarySplit } from "@/components/money-overview";
+import { CycleTrend } from "@/components/cycle-trend";
 
 const PALETTE = ["#4fe0ad", "#5b8def", "#f5b042", "#ff7a7e", "#a78bfa", "#38bdf8", "#fb923c", "#34d399", "#94a3b8"];
 const BAR = { ok: "bg-good", amber: "bg-warn", red: "bg-bad" } as const;
@@ -56,7 +57,13 @@ export default function InsightsPage() {
     <div className="space-y-4 pt-2">
       <h1 className="text-2xl font-bold">Insights</h1>
 
-      <SalaryUtilisation />
+      <SalarySplit />
+      <PlanVsActual />
+      <EveryRupee />
+      <CycleTrend />
+      <PaidBy />
+
+      <h2 className="pt-2 text-lg font-semibold">Daily spending</h2>
 
       <div role="tablist" className="grid grid-cols-2 rounded-full bg-surface p-1">
         {(["week", "cycle"] as const).map((m) => (

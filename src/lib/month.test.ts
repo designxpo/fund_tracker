@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { monthSummary, salaryUtilisation, type MonthItem } from "./month.ts";
+import { monthSummary, planVsActual, salaryUtilisation, type MonthItem } from "./month.ts";
 
 // Example persona's checklist (amounts are what was entered on Salary Day).
 const items: MonthItem[] = [
@@ -48,10 +48,31 @@ test("salary utilisation across buckets", () => {
   const by = Object.fromEntries(u.rows.map((r) => [r.key, r.amount]));
   assert.equal(by.emis, 17000);
   assert.equal(by.fixed, 4000);
-  assert.equal(by.saved, 15500);
+  assert.equal(by.saved, 13500);
+  assert.equal(by.setAside, 2000); // Surprise buffer
   assert.equal(by.daily, 1041);
   assert.equal(by.dailyLeft, 14459);
   assert.equal(u.left, 55000 - (17000 + 4000 + 15500 + 15500));
+  assert.equal(u.spent, 17000 + 4000 + 1041);
+});
+
+test("sinking-fund lines are set aside, not saved", () => {
+  const withSinking = [...items, { name: "Insurance", kind: "savings", planned: 3000, actual: null, goal_id: "ins" }];
+  const goals = [{ id: "ins", kind: "sinking" }, { id: "em", kind: "savings" }];
+  const u = salaryUtilisation(55000, 15500, 0, withSinking, [{ kind: "leftover", amount: 1000, goal_id: "ins" }], goals);
+  assert.equal(u.setAside, 2000 + 3000 + 1000);
+  assert.equal(u.saved, 13500);
+});
+
+test("plan vs actual: over/under per bucket and daily pace", () => {
+  const rows = planVsActual(items, [{ kind: "leftover", amount: 3000, goal_id: "lt" }], [], { budgetToDate: 5000, spent: 6200 });
+  const by = Object.fromEntries(rows.map((r) => [r.key, r]));
+  assert.deepEqual([by.fixed.plan, by.fixed.actual], [9000, 4000]); // supplements skipped, subscriptions up
+  assert.deepEqual([by.saved.plan, by.saved.actual], [12500, 16500]); // gold +1000, leftover +3000
+  assert.equal(by.saved.moreIsBetter, true);
+  assert.deepEqual([by.daily.plan, by.daily.actual, by.daily.moreIsBetter], [5000, 6200, false]);
+  // a bucket with nothing planned or spent is left out
+  assert.equal(planVsActual([], [], [], { budgetToDate: 0, spent: 0 }).length, 0);
 });
 
 test("leftover sent to the loan counts as EMIs & loan", () => {
