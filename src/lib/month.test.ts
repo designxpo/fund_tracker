@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { monthSummary, planVsActual, salaryUtilisation, type MonthItem } from "./month.ts";
+import { monthSummary, planVsActual, salaryCashFlow, salaryUtilisation, type MonthItem } from "./month.ts";
 
 // Example persona's checklist (amounts are what was entered on Salary Day).
 const items: MonthItem[] = [
@@ -79,4 +79,14 @@ test("leftover sent to the loan counts as EMIs & loan", () => {
   const u = salaryUtilisation(55000, 15500, 0, items, [{ kind: "leftover", amount: 3000, goal_id: null }]);
   assert.equal(u.rows.find((r) => r.key === "emis")!.amount, 20000);
   assert.equal(u.left, 0);
+});
+
+test("cash flow: this salary pays last cycle's card bill, not this cycle's card spends", () => {
+  const f = salaryCashFlow(55000, items, [], [], { cardBill: 9000, cash: 2500 });
+  const by = Object.fromEntries(f.rows.map((r) => [r.key, r.amount]));
+  assert.equal(by.cardBill, 9000);
+  assert.equal(by.cash, 2500);
+  assert.equal(by.saved, 13500);
+  assert.equal(f.spent, 17000 + 4000 + 9000 + 2500);
+  assert.equal(f.left, 55000 - (17000 + 4000 + 13500 + 2000 + 9000 + 2500));
 });

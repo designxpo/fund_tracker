@@ -126,3 +126,35 @@ export function planVsActual(
   rows.push({ key: "daily", label: BUCKET_LABELS.daily, plan: daily.budgetToDate, actual: daily.spent, moreIsBetter: false });
   return rows.filter((r) => r.plan !== 0 || r.actual !== 0);
 }
+
+export type FlowRow = { key: Bucket | "cardBill" | "cash"; label: string; amount: number };
+
+/**
+ * Cash-flow view of one salary: what it actually paid. It pays last cycle's card bill (the daily part;
+ * funds pay for planned/unplanned card spends) and this cycle's UPI/cash spends. This cycle's card
+ * spends wait for the next salary.
+ */
+export function salaryCashFlow(
+  salary: number,
+  items: MonthItem[],
+  settlements: MonthSettlement[],
+  goals: GoalKindRef[],
+  paid: { cardBill: number; cash: number },
+) {
+  const u = salaryUtilisation(salary, 0, 0, items, settlements, goals);
+  const rows: FlowRow[] = [
+    ...u.rows.filter((r): r is UtilRow & { key: Bucket } => r.key !== "daily" && r.key !== "dailyLeft"),
+    { key: "cardBill", label: "Last cycle's card bill", amount: paid.cardBill },
+    { key: "cash", label: "Daily spends by UPI / cash", amount: paid.cash },
+  ];
+  const used = rows.reduce((t, r) => t + r.amount, 0);
+  const by = (k: FlowRow["key"]) => rows.find((r) => r.key === k)!.amount;
+  return {
+    rows,
+    used,
+    left: salary - used,
+    spent: by("emis") + by("fixed") + paid.cardBill + paid.cash,
+    saved: u.saved,
+    setAside: u.setAside,
+  };
+}

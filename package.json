@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test src/lib/budget.test.ts src/lib/loan.test.ts src/lib/planner.test.ts src/lib/alerts.test.ts src/lib/month.test.ts",
+    "test": "node --test src/lib/budget.test.ts src/lib/loan.test.ts src/lib/planner.test.ts src/lib/alerts.test.ts src/lib/month.test.ts src/lib/coach.test.ts",
     "db:new": "supabase migration new < /dev/null",
     "db:push": "supabase db push --db-url \"$DATABASE_URL\"",
     "db:status": "supabase migration list --db-url \"$DATABASE_URL\"",

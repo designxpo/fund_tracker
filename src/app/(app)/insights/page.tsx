@@ -7,6 +7,7 @@ import { addDays, capLevel, dailyOnly, diffDays, parseYmd } from "@/lib/budget";
 import { inr } from "@/lib/money";
 import { EveryRupee, PaidBy, PlanVsActual, SalarySplit } from "@/components/money-overview";
 import { CycleTrend } from "@/components/cycle-trend";
+import { SavingsCoach } from "@/components/coach";
 
 const PALETTE = ["#4fe0ad", "#5b8def", "#f5b042", "#ff7a7e", "#a78bfa", "#38bdf8", "#fb923c", "#34d399", "#94a3b8"];
 const BAR = { ok: "bg-good", amber: "bg-warn", red: "bg-bad" } as const;
@@ -57,6 +58,7 @@ export default function InsightsPage() {
     <div className="space-y-4 pt-2">
       <h1 className="text-2xl font-bold">Insights</h1>
 
+      <SavingsCoach />
       <SalarySplit />
       <PlanVsActual />
       <EveryRupee />

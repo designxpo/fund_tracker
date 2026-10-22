@@ -4,41 +4,30 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store";
 import { ok, useData } from "@/lib/use-data";
-import { diffDays, parseYmd } from "@/lib/budget";
+import { parseYmd } from "@/lib/budget";
 import { inr } from "@/lib/money";
-import { BUCKET_LABELS, bucketOf, planVsActual, salaryUtilisation, type UtilRow } from "@/lib/month";
+import { BUCKET_LABELS, bucketOf, type FlowRow } from "@/lib/month";
+import { useMoney } from "@/lib/use-money";
 import { isDaily, type Spend } from "@/lib/types";
 
-/** One colour per bucket, the same on every chart (validated categorical order: blue, orange, aqua, yellow, magenta). */
-export const BUCKET_COLORS: Record<UtilRow["key"] | "planned" | "unplanned", string> = {
+/** One colour per bucket, the same on every chart (validated categorical order: blue, orange, aqua, yellow, magenta, violet). */
+export const BUCKET_COLORS: Record<FlowRow["key"] | "daily" | "planned" | "unplanned", string> = {
   emis: "#2a78d6",
   fixed: "#eb6834",
   saved: "#1baf7a",
   setAside: "#eda100",
+  cardBill: "#e87ba4",
+  cash: "#6250d6",
   daily: "#e87ba4",
-  dailyLeft: "#f6cddc",
-  planned: "#6250d6",
+  planned: "#008300",
   unplanned: "#e34948",
 };
 
 const shortDate = (d: string) => parseYmd(d).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 const pctOf = (n: number, of: number) => (of > 0 ? Math.round((n / of) * 100) : 0);
 
-/** This cycle's salary split and plan-vs-actual, from the store. */
-function useCycleMoney() {
-  const { cycle, summary, planItems, settlements, goals, today } = useStore();
-  if (!cycle || !summary) return null;
-  const salary = Number(cycle.salary);
-  const daily = Number(cycle.daily_budget);
-  const days = diffDays(summary.cycle.start, summary.cycle.end) + 1;
-  const elapsed = Math.min(days, Math.max(0, diffDays(summary.cycle.start, today) + 1));
-  const util = salaryUtilisation(salary, daily * days, summary.cycle.spent, planItems, settlements, goals);
-  const variance = planVsActual(planItems, settlements, goals, { budgetToDate: daily * elapsed, spent: summary.cycle.spent });
-  return { salary, util, variance, days, elapsed, start: summary.cycle.start, end: summary.cycle.end, available: util.rows.find((r) => r.key === "dailyLeft")!.amount + Math.max(0, util.left) };
-}
-
 /** Salary as one bar: each bucket's share, a 2px gap between parts, unallocated money as the track. */
-function SplitBar({ rows, salary, used, className = "h-4" }: { rows: UtilRow[]; salary: number; used: number; className?: string }) {
+function SplitBar({ rows, salary, used, className = "h-4" }: { rows: FlowRow[]; salary: number; used: number; className?: string }) {
   const scale = Math.max(salary, used);
   return (
     <div className={`flex gap-[2px] overflow-hidden rounded-full bg-line ${className}`} role="img" aria-label="How the salary is split">
@@ -51,40 +40,40 @@ function SplitBar({ rows, salary, used, className = "h-4" }: { rows: UtilRow[]; 
   );
 }
 
-/** Home: salary at a glance, linking to the full picture on Insights. */
+/** Home: what this salary has paid so far, and how much of the next one is already spent. */
 export function SalarySnapshot() {
-  const m = useCycleMoney();
+  const m = useMoney();
   if (!m || m.salary <= 0) return null;
-  const { util } = m;
+  const { flow } = m;
   return (
     <Link href="/insights" className="block rounded-2xl bg-surface p-4 shadow-sm">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-semibold">Salary {inr(m.salary)}</h2>
         <span className="text-xs text-muted">Where it went ›</span>
       </div>
-      <SplitBar rows={util.rows} salary={m.salary} used={util.used} className="mt-3 h-3" />
+      <SplitBar rows={flow.rows} salary={m.salary} used={flow.used} className="mt-3 h-3" />
       <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
         <div>
           <dt className="text-xs text-muted">Spent</dt>
-          <dd className="font-semibold tabular-nums">{inr(util.spent)}</dd>
+          <dd className="font-semibold tabular-nums">{inr(flow.spent)}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted">Saved & set aside</dt>
-          <dd className="font-semibold tabular-nums text-good">{inr(util.saved + util.setAside)}</dd>
+          <dt className="text-xs text-muted">Invested ({Math.round(m.rate * 100)}%)</dt>
+          <dd className="font-semibold tabular-nums text-good">{inr(flow.saved)}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted">{util.left < 0 ? "Over salary" : "Available"}</dt>
-          <dd className={`font-semibold tabular-nums ${util.left < 0 ? "text-bad" : ""}`}>{inr(util.left < 0 ? -util.left : m.available)}</dd>
+          <dt className="text-xs text-muted">Next salary used</dt>
+          <dd className={`font-semibold tabular-nums ${m.nextCardBill > 0 ? "text-warn" : ""}`}>{inr(m.nextCardBill)}</dd>
         </div>
       </dl>
     </Link>
   );
 }
 
-/** Insights hero: salary in, and every part of it: spent, saved, set aside, still available. */
+/** Insights: what this salary paid (cash flow), what's left in the account, and what the next salary already owes. */
 export function SalarySplit() {
   const { cycle } = useStore();
-  const m = useCycleMoney();
+  const m = useMoney();
   const { data: extra } = useData(
     "cycle-income",
     async () => {
@@ -95,20 +84,20 @@ export function SalarySplit() {
     cycle?.id,
   );
   if (!m) return null;
-  const { util, salary } = m;
+  const { flow, salary } = m;
   const tiles = [
-    { label: "Spent", value: util.spent, note: "EMIs, fixed costs, daily", tone: "" },
-    { label: "Saved & invested", value: util.saved, note: `${pctOf(util.saved, salary)}% of salary`, tone: "text-good" },
-    { label: "Set aside", value: util.setAside, note: "Sinking funds & buffer", tone: "" },
-    util.left < 0
-      ? { label: "Over salary", value: -util.left, note: "Plan is more than salary", tone: "text-bad" }
-      : { label: "Still available", value: m.available, note: "Daily budget left + unallocated", tone: "" },
+    { label: "Spent", value: flow.spent, note: "Card bill, EMIs, fixed, UPI/cash", tone: "" },
+    { label: "Saved & invested", value: flow.saved, note: `${pctOf(flow.saved, salary)}% of salary`, tone: "text-good" },
+    { label: "Set aside", value: flow.setAside, note: "Sinking funds & buffer", tone: "" },
+    flow.left < 0
+      ? { label: "Over salary", value: -flow.left, note: "Paid out more than came in", tone: "text-bad" }
+      : { label: "Left in account", value: flow.left, note: "Not paid out yet", tone: "" },
   ];
 
   return (
-    <section aria-label="Where your salary went" className="glass-hero rounded-3xl p-4">
+    <section aria-label="Where your salary went" className="rounded-2xl bg-surface p-4 shadow-sm">
       <div className="flex items-baseline justify-between">
-        <p className="text-sm text-muted">Salary this cycle</p>
+        <h2 className="text-sm font-semibold">Where this salary went</h2>
         <p className="text-xs text-muted">
           {shortDate(m.start)} – {shortDate(m.end)} · day {m.elapsed}/{m.days}
         </p>
@@ -126,9 +115,9 @@ export function SalarySplit() {
         ))}
       </dl>
 
-      <SplitBar rows={util.rows} salary={salary} used={util.used} className="mt-4 h-4" />
+      <SplitBar rows={flow.rows} salary={salary} used={flow.used} className="mt-4 h-4" />
       <ul className="mt-3 space-y-1.5 text-sm">
-        {util.rows.map((r) => (
+        {flow.rows.map((r) => (
           <li key={r.key} className="flex items-center gap-2">
             <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: BUCKET_COLORS[r.key] }} />
             <span className="flex-1">{r.label}</span>
@@ -138,19 +127,33 @@ export function SalarySplit() {
         ))}
         <li className="flex items-center gap-2 border-t border-line pt-1.5 font-semibold">
           <span className="h-3 w-3 shrink-0 rounded-full bg-line" />
-          <span className="flex-1">{util.left >= 0 ? "Not allocated yet" : "Over salary"}</span>
-          <span className="w-10 text-right text-xs tabular-nums text-muted">{pctOf(Math.abs(util.left), salary)}%</span>
-          <span className={`w-24 text-right tabular-nums ${util.left >= 0 ? "text-good" : "text-bad"}`}>{inr(util.left)}</span>
+          <span className="flex-1">{flow.left >= 0 ? "Left in account" : "Over salary"}</span>
+          <span className="w-10 text-right text-xs tabular-nums text-muted">{pctOf(Math.abs(flow.left), salary)}%</span>
+          <span className={`w-24 text-right tabular-nums ${flow.left >= 0 ? "text-good" : "text-bad"}`}>{inr(flow.left)}</span>
         </li>
       </ul>
-      <p className="mt-2 text-xs text-muted">Plan lines use the amounts entered on Salary Day (or the plan, until you enter one).</p>
+
+      {m.nextCardBill > 0 && (
+        <div className="mt-3 rounded-xl bg-warn/10 p-3 text-sm">
+          <p>
+            💳 <b className="tabular-nums">{inr(m.nextCardBill)}</b> on credit cards this cycle
+          </p>
+          <p className="text-xs text-muted">
+            Your next salary ({shortDate(m.nextSalaryOn)}) pays this bill first, so it&apos;s already spent before it arrives. Keep{" "}
+            {flow.left >= m.nextCardBill ? "it" : "enough"} in the account for it.
+          </p>
+        </div>
+      )}
+      <p className="mt-2 text-xs text-muted">
+        This salary pays last cycle&apos;s card bill and this cycle&apos;s UPI/cash spends; this cycle&apos;s card spends wait for the next salary.
+      </p>
     </section>
   );
 }
 
 /** Over/under per bucket: bar = actual, tick = plan, with the difference in words. */
 export function PlanVsActual() {
-  const m = useCycleMoney();
+  const m = useMoney();
   if (!m || !m.variance.length) return null;
   const spending = m.variance.filter((r) => !r.moreIsBetter);
   const over = spending.reduce((t, r) => t + Math.max(0, r.actual - r.plan), 0);
@@ -328,8 +331,8 @@ export function EveryRupee() {
         </ul>
       )}
       <p className="mt-2 text-xs text-muted">
-        Planned and unplanned spends come out of money you set aside earlier (sinking funds and the buffer), so they aren&apos;t a new cut of this salary. Tap a
-        row to see each spend.
+        Everything you spent this cycle, however you paid. Card spends are paid by your next salary; planned and unplanned spends come out of money set
+        aside earlier. Tap a row to see each spend.
       </p>
     </section>
   );
@@ -338,7 +341,8 @@ export function EveryRupee() {
 /** How it was paid: card bill settled on Salary Day, then this cycle's spends by card / payment mode. */
 export function PaidBy() {
   const { summary, spends, cards, settlements } = useStore();
-  if (!summary) return null;
+  const m = useMoney();
+  if (!summary || !m) return null;
   const bill = settlements.find((s) => s.kind === "card_bills");
   const inCycle = spends.filter((s) => s.spent_on >= summary.cycle.start && s.spent_on <= summary.cycle.end);
   const modes = [...cards.map((c) => ({ id: c.id as string | null, name: c.nickname, credit: c.monthly_cap > 0 })), { id: null, name: "No card picked", credit: false }]
@@ -366,10 +370,17 @@ export function PaidBy() {
             <span className="font-semibold tabular-nums">{inr(Number(bill.amount))}</span>
           </div>
           <p className={`text-xs ${bill.done ? "text-good" : "text-warn"}`}>{bill.done ? "✓ Paid in full" : "Not marked paid yet (Salary → step 1)"}</p>
-          <p className="mt-0.5 text-xs text-muted">Covers last cycle&apos;s card spends, which were counted in last cycle, so it isn&apos;t added again here.</p>
+          <p className="mt-0.5 text-xs text-muted">
+            For last cycle&apos;s card spends. {inr(m.cardBill)} of it was daily spending, paid from this salary
+            {Number(bill.amount) > m.cardBill ? `; ${inr(Number(bill.amount) - m.cardBill)} was planned/unplanned, paid from your funds` : ""}.
+          </p>
         </div>
       )}
-      {onCards > 0 && <p className="mt-2 text-xs text-muted">{inr(onCards)} on credit cards this cycle will be on next Salary Day&apos;s bill.</p>}
+      {onCards > 0 && (
+        <p className="mt-2 text-xs text-muted">
+          {inr(onCards)} on credit cards this cycle goes on the bill your next salary pays ({shortDate(m.nextSalaryOn)}).
+        </p>
+      )}
       <ul className="mt-1 divide-y divide-line text-sm">
         {modes.map((m) => (
           <li key={m.name} className="py-2">

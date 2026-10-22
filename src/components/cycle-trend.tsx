@@ -1,75 +1,54 @@
 "use client";
 
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { createClient } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store";
-import { ok, useData } from "@/lib/use-data";
 import { parseYmd } from "@/lib/budget";
 import { inr } from "@/lib/money";
-import { BUCKET_LABELS, salaryUtilisation, type MonthItem, type MonthSettlement } from "@/lib/month";
+import { pastFlow, useMoney, useMoneyHistory } from "@/lib/use-money";
+import type { FlowRow } from "@/lib/month";
 import { BUCKET_COLORS } from "@/components/money-overview";
 
-const SERIES = ["emis", "fixed", "saved", "setAside", "daily"] as const;
-const LABELS = { ...BUCKET_LABELS, setAside: "Set aside" };
+const SERIES = ["emis", "fixed", "saved", "setAside", "cardBill", "cash"] as const;
+const LABELS: Record<(typeof SERIES)[number], string> = {
+  emis: "EMIs & loan",
+  fixed: "Fixed costs",
+  saved: "Saved & invested",
+  setAside: "Set aside",
+  cardBill: "Card bill",
+  cash: "UPI / cash",
+};
 
-type Past = { id: string; starts_on: string; salary: number; items: MonthItem[]; settlements: MonthSettlement[]; dailySpent: number };
-type Row = Record<(typeof SERIES)[number], number> & { label: string; salary: number; left: number; current: boolean };
+type Row = Record<(typeof SERIES)[number], number> & { label: string; salary: number; left: number };
 
-/** Last few closed cycles: salary, plan lines, moves and daily spending. */
-async function fetchHistory(): Promise<Past[]> {
-  const sb = createClient();
-  const cycles = ok(
-    await sb.from("cycles").select("id, starts_on, ends_on, salary").not("ends_on", "is", null).order("starts_on", { ascending: false }).limit(5),
-  ) as { id: string; starts_on: string; ends_on: string; salary: number }[];
-  if (!cycles.length) return [];
-  const ids = cycles.map((c) => c.id);
-  const [items, sets, ...daily] = await Promise.all([
-    sb.from("plan_items").select("cycle_id, name, kind, goal_id, planned, actual").in("cycle_id", ids).then(ok),
-    sb.from("cycle_settlements").select("cycle_id, kind, goal_id, amount").in("cycle_id", ids).then(ok),
-    ...cycles.map((c) =>
-      sb.from("spends").select("amount").eq("spend_type", "daily").gte("spent_on", c.starts_on).lte("spent_on", c.ends_on).limit(5000).then(ok),
-    ),
-  ]);
-  type R = { cycle_id: string; kind: string; goal_id: string | null; name: string; planned: unknown; actual: unknown; amount: unknown };
-  return cycles
-    .map((c, i) => ({
-      id: c.id,
-      starts_on: c.starts_on,
-      salary: Number(c.salary),
-      items: (items as R[])
-        .filter((r) => r.cycle_id === c.id)
-        .map((r): MonthItem => ({ ...r, planned: Number(r.planned), actual: r.actual == null ? null : Number(r.actual) })),
-      settlements: (sets as R[]).filter((r) => r.cycle_id === c.id).map((r): MonthSettlement => ({ ...r, amount: Number(r.amount) })),
-      dailySpent: (daily[i] as { amount: unknown }[]).reduce((t: number, s) => t + Number(s.amount), 0),
-    }))
-    .reverse();
-}
-
-/** Month by month: where each salary went, stacked, with the salary as a dashed line. */
+/** Month by month: what each salary paid (cash flow), stacked, with the salary as a dashed line. */
 export function CycleTrend() {
-  const { cycle, summary, planItems, settlements, goals } = useStore();
-  const { data: history, loading, error } = useData("money-history", fetchHistory, cycle?.id);
-  if (!cycle || !summary) return null;
+  const { cycle, cards, goals } = useStore();
+  const { data: history, loading, error } = useMoneyHistory(cycle?.id);
+  const m = useMoney();
+  if (!cycle || !m) return null;
 
-  const toRow = (p: Omit<Past, "id">, current: boolean): Row => {
-    const u = salaryUtilisation(p.salary, 0, p.dailySpent, p.items, p.settlements, goals);
-    const amount = (k: (typeof SERIES)[number]) => Math.max(0, u.rows.find((r) => r.key === k)!.amount);
-    const month = parseYmd(p.starts_on).toLocaleDateString("en-IN", { month: "short" });
+  const credit = new Set([...cards.filter((c) => c.monthly_cap > 0).map((c) => c.id), ...(history?.creditIds ?? [])]);
+  const toRow = (label: string, salary: number, f: { rows: FlowRow[]; left: number }): Row => {
+    const amount = (k: (typeof SERIES)[number]) => Math.max(0, f.rows.find((r) => r.key === k)!.amount);
     return {
-      label: current ? `${month} (now)` : month,
-      salary: p.salary,
-      left: u.left,
-      current,
+      label,
+      salary,
+      left: f.left,
       emis: amount("emis"),
       fixed: amount("fixed"),
       saved: amount("saved"),
       setAside: amount("setAside"),
-      daily: amount("daily"),
+      cardBill: amount("cardBill"),
+      cash: amount("cash"),
     };
   };
+  const month = (d: string) => parseYmd(d).toLocaleDateString("en-IN", { month: "short" });
+  const past = history?.cycles ?? [];
+  // The oldest fetched cycle only supplies the card bill for the one after it.
+  const shown = past.length > 5 ? past.slice(1) : past;
   const rows: Row[] = [
-    ...(history ?? []).map((p) => toRow(p, false)),
-    toRow({ starts_on: cycle.starts_on, salary: Number(cycle.salary), items: planItems, settlements, dailySpent: summary.cycle.spent }, true),
+    ...shown.map((c) => toRow(month(c.starts_on), c.salary, pastFlow(c, past[past.indexOf(c) - 1], credit, goals))),
+    toRow(`${month(cycle.starts_on)} (now)`, m.salary, m.flow),
   ];
 
   return (
@@ -133,14 +112,14 @@ export function CycleTrend() {
                     <tr key={r.label}>
                       <td className="py-1">{r.label}</td>
                       <td className="text-right">{inr(r.salary)}</td>
-                      <td className="text-right">{inr(r.emis + r.fixed + r.daily)}</td>
+                      <td className="text-right">{inr(r.emis + r.fixed + r.cardBill + r.cash)}</td>
                       <td className="text-right text-good">{inr(r.saved + r.setAside)}</td>
                       <td className={`text-right ${r.left < 0 ? "text-bad" : ""}`}>{inr(r.left)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <p className="mt-1 text-muted">*Saved & invested plus set aside. Current cycle is so far.</p>
+              <p className="mt-1 text-muted">*Saved & invested plus set aside. Each salary pays the card bill of the cycle before it. Current cycle is so far.</p>
             </div>
           </details>
         </>
