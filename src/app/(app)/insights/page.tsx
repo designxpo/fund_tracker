@@ -8,12 +8,13 @@ import { inr } from "@/lib/money";
 import { EveryRupee, PaidBy, PlanVsActual, SalarySplit } from "@/components/money-overview";
 import { CycleTrend } from "@/components/cycle-trend";
 import { SavingsCoach } from "@/components/coach";
+import { DailyBalance } from "@/components/daily-balance";
 
 const PALETTE = ["#4fe0ad", "#5b8def", "#f5b042", "#ff7a7e", "#a78bfa", "#38bdf8", "#fb923c", "#34d399", "#94a3b8"];
 const BAR = { ok: "bg-good", amber: "bg-warn", red: "bg-bad" } as const;
 
 export default function InsightsPage() {
-  const { ready, summary, spends, cards, categories, cycle } = useStore();
+  const { ready, summary, spends, cards, categories, cycle, today } = useStore();
   const [mode, setMode] = useState<"week" | "cycle">("week");
 
   const range = summary ? (mode === "week" ? summary.week : summary.cycle) : null;
@@ -115,6 +116,8 @@ export default function InsightsPage() {
         </div>
       </section>
 
+      <DailyBalance days={days} daily={daily} today={today} periodLabel={mode === "week" ? "this week" : "this cycle"} />
+
       {(outside.planned > 0 || outside.unplanned > 0) && (
         <section className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-surface p-3">
@@ -138,7 +141,7 @@ export default function InsightsPage() {
             <div className="mx-auto h-44 w-44" role="img" aria-label="Category share of spending">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={byCat} dataKey="value" innerRadius={52} outerRadius={80} paddingAngle={2} stroke="none">
+                  <Pie data={byCat.filter((c) => c.value > 0)} dataKey="value" innerRadius={52} outerRadius={80} paddingAngle={2} stroke="none">
                     {byCat.map((c, i) => (
                       <Cell key={c.id} fill={PALETTE[i % PALETTE.length]} />
                     ))}

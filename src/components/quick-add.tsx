@@ -73,13 +73,15 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const [fundId, setFundId] = useState<string | null>(null);
   const [covering, setCovering] = useState(false);
   const [settleChoice, setSettleChoice] = useState<FundSettle | null>(null); // null = decide from the card
+  const [refund, setRefund] = useState(false); // money back: saved as a negative amount
   const [busy, setBusy] = useState(false);
 
   const open = (spend?: Spend) => {
     // Synchronous so focus() below still counts as part of the tap (iOS needs this to raise the keyboard).
     flushSync(() => {
       setEditing(spend ?? null);
-      setAmount(spend ? String(spend.amount) : "");
+      setAmount(spend ? String(Math.abs(spend.amount)) : "");
+      setRefund(!!spend && spend.amount < 0);
       setCategoryId(spend?.category_id ?? null);
       setPickedCard(spend?.card_id ?? null);
       setNote(spend?.note ?? "");
@@ -110,6 +112,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   }, [isOpen]);
 
   const amt = parseFloat(amount) || 0;
+  const signed = refund ? -amt : amt;
   const category = categories.find((c) => c.id === categoryId);
   const birthdayCard = isBirthdayWindow(settings?.birthday, today) ? settings?.birthday_card_id : null;
   const suggestedId = suggestCardId(category, amt, birthdayCard);
@@ -131,7 +134,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const fundAvail = fund
     ? fund.available + (editing && !isDaily(editing) && editing.goal_id === fund.id ? Number(editing.amount) : 0)
     : 0;
-  const shortfall = spendType === "unplanned" && settle === "now" ? Math.max(0, amt - fundAvail) : 0;
+  const shortfall = !refund && spendType === "unplanned" && settle === "now" ? Math.max(0, amt - fundAvail) : 0;
 
   // Most-used categories first (this cycle), then configured order.
   const sortedCats = useMemo(() => {
@@ -147,11 +150,11 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
 
   // Live preview: what would this spend do to today / this week / this cycle?
   const impact = useMemo(() => {
-    if (!cycle || !(amt > 0) || !isOpen || spendType !== "daily") return null;
+    if (!cycle || !(amt > 0) || refund || !isOpen || spendType !== "daily") return null;
     const others = spends.filter((s) => s.id !== editing?.id);
     const draft = { amount: amt, spent_on: date || today, card_id: null };
     return spendImpact(summarize(others, cycle, today), summarize([...others, draft], cycle, today));
-  }, [cycle, amt, isOpen, spends, editing?.id, date, today, spendType]);
+  }, [cycle, amt, refund, isOpen, spends, editing?.id, date, today, spendType]);
 
   // Would this spend push the chosen card past its monthly cap?
   const capSpends = dailyOnly(spends.filter((s) => s.id !== editing?.id));
@@ -164,7 +167,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
           card.id,
         )
       : 0;
-  const overCap = spendType === "daily" && !!card && card.monthly_cap > 0 && cardSpentBefore + amt > card.monthly_cap;
+  const overCap = !refund && spendType === "daily" && !!card && card.monthly_cap > 0 && cardSpentBefore + amt > card.monthly_cap;
   const overKey = `${cardId}:${amt}`;
   const needsConfirm = overCap && confirmedKey !== overKey;
   const switchTo = overCap
@@ -191,7 +194,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const commit = () => {
     if (!cycle) return;
     const payload = {
-      amount: amt,
+      amount: signed,
       category_id: categoryId,
       card_id: cardId,
       note: note.trim() || null,
@@ -211,7 +214,9 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
       next = [...spends, created];
     }
     let msg: string;
-    if (spendType === "daily") {
+    if (refund) {
+      msg = `${inr(amt)} refund on ${card?.nickname ?? "No card"} · back in ${spendType === "daily" ? "your daily budget" : (fund?.name ?? "the fund")}`;
+    } else if (spendType === "daily") {
       const left = summarize(next, cycle, today).leftToday;
       msg = `${inr(amt)} · ${category?.name} · ${card?.nickname ?? "No card"} — ${left >= 0 ? `${inr(left)} left today` : `${inr(-left)} over today`}`;
     } else if (settle === "bill" && fund) {
@@ -283,7 +288,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
         />
         <div
           role="dialog"
-          aria-label={editing ? "Edit spend" : "Add spend"}
+          aria-label={refund ? (editing ? "Edit refund" : "Add refund") : editing ? "Edit spend" : "Add spend"}
           className="glass-chrome absolute inset-x-0 mx-auto flex max-w-md flex-col rounded-t-[32px] transition-transform duration-300 ease-[cubic-bezier(.2,.9,.25,1)]"
           style={{
             bottom: inset,
@@ -304,8 +309,8 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
               }}
             />
 
-            <label className="flex items-baseline gap-1 border-b border-line pb-2">
-              <span className="text-3xl font-semibold text-muted">₹</span>
+            <label className={`flex items-baseline gap-1 border-b border-line pb-2 ${refund ? "text-good" : ""}`}>
+              <span className="shrink-0 whitespace-nowrap text-3xl font-semibold text-muted">{refund ? "+₹" : "₹"}</span>
               <input
                 ref={amountRef}
                 inputMode="decimal"
@@ -318,6 +323,23 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
                 className="w-full bg-transparent text-4xl font-bold tabular-nums outline-none placeholder:text-line"
               />
             </label>
+            <div className="mt-2 flex items-center gap-2 text-xs">
+              <button
+                onClick={() => {
+                  setRefund((v) => !v);
+                  setCovering(false);
+                }}
+                aria-pressed={refund}
+                className={`h-9 shrink-0 rounded-full border px-3 font-medium transition ${refund ? "border-good bg-good/15 text-good" : "border-line text-muted"}`}
+              >
+                ↩ Refund / money back
+              </button>
+              {refund && (
+                <span className="text-muted">
+                  Lowers {card?.nickname ?? "the card"}&apos;s total and goes back to {spendType === "daily" ? "your daily budget" : (fund?.name ?? "the fund")}.
+                </span>
+              )}
+            </div>
             {spendType === "planned" &&
               (sinkingFunds.length === 0 ? (
                 <p className="mt-1.5 text-sm text-warn">No sinking funds yet. Add one under Goals first.</p>
@@ -332,8 +354,8 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
                   </Chips>
                   {fund && amt > 0 && (
                     <p className={`mt-1.5 text-sm ${fundAvail - amt < 0 ? "font-medium text-warn" : "text-muted"}`}>
-                      {fund.name}: {inr(fundAvail)} free → {inr(fundAvail - amt)}
-                      {fundAvail - amt < 0 ? " (more than the fund holds)" : ""} · daily budget untouched
+                      {fund.name}: {inr(fundAvail)} free → {inr(fundAvail - signed)}
+                      {fundAvail - signed < 0 ? " (more than the fund holds)" : ""} · daily budget untouched
                     </p>
                   )}
                 </>
@@ -345,7 +367,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
                     ? `On the card bill: Surprise buffer pays it when you settle (${inr(fundAvail)} free now) · daily budget untouched`
                     : shortfall > 0
                       ? `Surprise buffer has ${inr(fundAvail)}: ${inr(shortfall)} short. You'll pick where the rest comes from.`
-                      : `From Surprise buffer: ${inr(fundAvail)}${amt > 0 ? ` → ${inr(fundAvail - amt)}` : " available"} · daily budget untouched`
+                      : `${refund ? "Back to" : "From"} Surprise buffer: ${inr(fundAvail)}${amt > 0 ? ` → ${inr(fundAvail - signed)}` : " available"} · daily budget untouched`
                   : "No Surprise buffer found."}
               </p>
             )}
@@ -457,7 +479,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
                 disabled={!canSave}
                 className="h-14 w-full rounded-full bg-navy text-lg font-semibold text-white shadow-[0_10px_24px_-10px_rgba(20,38,79,.6)] transition active:scale-[.98] disabled:opacity-40"
               >
-                {editing ? "Update" : "Save"}
+                {editing ? "Update" : refund ? "Save refund" : "Save"}
               </button>
             )}
           </div>

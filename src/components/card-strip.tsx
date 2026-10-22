@@ -1,18 +1,22 @@
 "use client";
 
+import { useState } from "react";
 import { capLevel, sumBetween } from "@/lib/budget";
 import { inr } from "@/lib/money";
 import { useStore } from "@/lib/store";
-import { isDaily } from "@/lib/types";
+import { isDaily, type Card } from "@/lib/types";
+import { CardMatch } from "@/components/card-match";
 
 const BAR = { ok: "bg-good", amber: "bg-warn", red: "bg-bad" } as const;
 const TEXT = { ok: "text-muted", amber: "text-warn", red: "text-bad" } as const;
 
 export function CardStrip() {
   const { cards, dailySpends, spends, summary } = useStore();
+  const [matching, setMatching] = useState<Card | null>(null);
   if (!summary) return null;
   return (
     <section aria-label="Cards" className="grid grid-cols-2 gap-3">
+      {matching && <CardMatch card={matching} onClose={() => setMatching(null)} />}
       {cards.map((c) => {
         const spent = sumBetween(dailySpends, summary.cycle.start, summary.cycle.end, c.id);
         const level = capLevel(spent, c.monthly_cap);
@@ -22,7 +26,7 @@ export function CardStrip() {
           .reduce((t, s) => t + Number(s.amount), 0);
         const pct = c.monthly_cap > 0 ? Math.min(100, (spent / c.monthly_cap) * 100) : 0;
         return (
-          <div key={c.id} className="rounded-2xl bg-surface p-3 shadow-sm">
+          <button key={c.id} onClick={() => setMatching(c)} className="rounded-2xl bg-surface p-3 text-left shadow-sm active:scale-[.98]">
             <p className="truncate text-xs font-medium text-muted">{c.nickname}</p>
             <p className="mt-1 text-lg font-semibold tabular-nums">{inr(spent)}</p>
             {extra > 0 && <p className="-mt-0.5 text-[11px] font-medium text-navy">+{inr(extra)} planned/unplanned</p>}
@@ -43,7 +47,8 @@ export function CardStrip() {
             ) : (
               <p className="mt-3 text-[11px] text-muted">no cap</p>
             )}
-          </div>
+            <p className="mt-1.5 text-[11px] font-medium text-navy">Match with bank ›</p>
+          </button>
         );
       })}
     </section>

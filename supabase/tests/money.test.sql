@@ -67,6 +67,21 @@ do $$ declare d0 date; d1 date; g uuid; begin
   assert (select next_due_date from goals where id = g) = d0, 'planned deleted: due date moves back';
 end $$;
 
+-- Refunds: a negative amount; a fund refund goes back in, and doesn't move a sinking due date
+insert into spends (id, amount, spend_type, goal_id, fund_settle)
+  select 'c0000000-0000-0000-0000-000000000004', -100, 'unplanned', id, 'now' from goals where role = 'buffer';
+do $$ begin assert pg_temp.bal('buffer') = -200, 'refund: buffer +100'; end $$;
+delete from spends where id = 'c0000000-0000-0000-0000-000000000004';
+do $$ declare d0 date; g uuid; begin
+  select id, next_due_date into g, d0 from goals where kind = 'sinking';
+  insert into spends (id, amount, spend_type, goal_id) values ('c0000000-0000-0000-0000-000000000005', -400, 'planned', g);
+  assert (select next_due_date from goals where id = g) = d0, 'planned refund: due date unchanged';
+  delete from spends where id = 'c0000000-0000-0000-0000-000000000005';
+  assert (select next_due_date from goals where id = g) = d0, 'planned refund deleted: due date unchanged';
+  begin insert into spends (amount) values (0); assert false, 'zero spend accepted';
+  exception when check_violation then null; end;
+end $$;
+
 do $$ begin
   begin insert into spends (amount, spend_type) values (10, 'planned'); assert false, 'planned without fund accepted';
   exception when check_violation then null; end;
