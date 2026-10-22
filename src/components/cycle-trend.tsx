@@ -1,6 +1,6 @@
 "use client";
 
-import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useStore } from "@/lib/store";
 import { parseYmd } from "@/lib/budget";
 import { inr } from "@/lib/money";
@@ -78,7 +78,28 @@ export function CycleTrend() {
                 {SERIES.map((k) => (
                   <Bar key={k} dataKey={k} name={LABELS[k]} stackId="s" fill={BUCKET_COLORS[k]} stroke="var(--surface-solid)" strokeWidth={1} />
                 ))}
-                <Line dataKey="salary" name="Salary" type="linear" stroke="var(--ink)" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 4, fill: "var(--ink)" }} />
+                {rows.length > 1 ? (
+                  <Line
+                    dataKey="salary"
+                    name="Salary"
+                    type="linear"
+                    stroke="var(--ink)"
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    dot={{ r: 4, fill: "var(--ink)", stroke: "var(--surface-solid)", strokeWidth: 2, strokeDasharray: "none" }}
+                    activeDot={{ r: 5, strokeDasharray: "none" }}
+                  />
+                ) : (
+                  // One cycle: a dot alone means nothing, so draw the salary as a labelled line across the chart.
+                  <ReferenceLine
+                    y={rows[0].salary}
+                    ifOverflow="extendDomain"
+                    stroke="var(--ink)"
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    label={{ value: `Salary ${inr(rows[0].salary)}`, position: "insideTopLeft", fontSize: 11, fill: "var(--ink)" }}
+                  />
+                )}
               </ComposedChart>
             </ResponsiveContainer>
           </div>
