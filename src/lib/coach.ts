@@ -51,6 +51,8 @@ export type CoachInput = {
   overPlan: { name: string; diff: number }[];
   /** daily spends on credit cards this cycle (next salary pays them), and last cycle's by the same day */
   nextCardBill: number;
+  /** funds (e.g. the Surprise buffer) that paid out more than they had */
+  overspentFunds: { name: string; amount: number }[];
   lastCardBillSameDay: number | null;
   /** biggest category increase vs the same point last cycle */
   categoryUp: { name: string; now: number; before: number } | null;
@@ -82,6 +84,17 @@ export function coachNudges(i: CoachInput): Nudge[] {
       title: `${rs(i.unallocated)} of this salary has no job yet`,
       body: `Money left idle in your account gets spent. Invest it now: in 10 years it could be ${big(lumpValue(i.unallocated, 10))}.`,
       href: "/salary",
+    });
+
+  const worst = [...i.overspentFunds].sort((a, b) => b.amount - a.amount)[0];
+  if (worst && worst.amount >= 100)
+    add({
+      id: `fund-red-${worst.name}`,
+      tone: "warn",
+      priority: 88,
+      title: `${rs(worst.amount)} spent beyond your ${worst.name}`,
+      body: `It paid out more than it had, so the rest comes out of this salary. Keep "Unplanned" for real surprises, and go lean until salary day.`,
+      href: "/insights",
     });
 
   if (i.savedPlan - i.saved >= 1)

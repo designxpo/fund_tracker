@@ -25,6 +25,10 @@ and plan goals. Next.js (App Router) + Tailwind + Supabase (Postgres, RLS, Auth)
   loan plan lines link via `loan_id`.
 - **Bookkeeping** (card bills, daily-budget result, leftover moved / shortfall borrowed) lives in
   `cycle_settlements`; `plan_items` holds only real plan lines. Balances come from the `goal_balances` view.
+- **Money left** (Home): salary − bills & EMIs − saved − set aside in funds − daily spending − whatever funds paid
+  out beyond their balance (`moneyLeft` in `src/lib/month.ts`). History compares total spending month by month.
+- **Money back** (refunds, cashback, fee reversals) is a spend with a negative amount, so card totals, bills, budgets
+  and funds all net it out. Needs migration `20261022090000_refunds.sql`.
 - **Errors** (sync rejections, crashes, failed actions) are recorded in `client_errors`
   and listed under Settings → Recent app errors.
 

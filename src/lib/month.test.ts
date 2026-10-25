@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { monthSummary, planVsActual, salaryCashFlow, salaryUtilisation, type MonthItem } from "./month.ts";
+import { categoryChange, moneyLeft, monthSpending, monthSummary, pacePlans, planVsActual, salaryUtilisation, type MonthItem } from "./month.ts";
 
 // Example persona's checklist (amounts are what was entered on Salary Day).
 const items: MonthItem[] = [
@@ -81,12 +81,61 @@ test("leftover sent to the loan counts as EMIs & loan", () => {
   assert.equal(u.left, 0);
 });
 
-test("cash flow: this salary pays last cycle's card bill, not this cycle's card spends", () => {
-  const f = salaryCashFlow(55000, items, [], [], { cardBill: 9000, cash: 2500 });
-  const by = Object.fromEntries(f.rows.map((r) => [r.key, r.amount]));
-  assert.equal(by.cardBill, 9000);
-  assert.equal(by.cash, 2500);
+test("money left: salary minus bills, savings, funds, spending and fund overspend", () => {
+  const funds = [
+    { id: "buf", kind: "buffer", name: "Surprise buffer", available: -1500 },
+    { id: "em", kind: "savings", name: "Emergency fund", available: 40000 },
+    { id: "cash", kind: "savings", name: "Cash at home", available: -10, locked: true },
+  ];
+  const m = moneyLeft(55000, items, [], funds, 6000);
+  const by = Object.fromEntries(m.rows.map((r) => [r.key, r.amount]));
+  assert.equal(by.bills, 17000 + 4000);
   assert.equal(by.saved, 13500);
-  assert.equal(f.spent, 17000 + 4000 + 9000 + 2500);
-  assert.equal(f.left, 55000 - (17000 + 4000 + 13500 + 2000 + 9000 + 2500));
+  assert.equal(by.setAside, 2000);
+  assert.equal(by.spent, 6000);
+  assert.equal(by.overspent, 1500); // the buffer is ₹1,500 in the red; locked funds never count
+  assert.deepEqual(m.overspent, [{ name: "Surprise buffer", amount: 1500 }]);
+  assert.equal(m.left, 55000 - 21000 - 13500 - 2000 - 6000 - 1500);
+});
+
+test("money left equals the unallocated leftover plus the unspent daily budget, minus fund overspend", () => {
+  const reserve = 15500;
+  const fromBudget = monthSummary(55000, reserve, items).result + (reserve - 6000);
+  assert.equal(moneyLeft(55000, items, [], [], 6000).left, fromBudget);
+});
+
+test("pace plans split what's left over the days to salary", () => {
+  const [half, quarter, all] = pacePlans(6500, 500, 7); // ₹7,000 for 7 days, ₹500 spent today
+  assert.deepEqual(half, { keep: 0.5, perDay: 500, save: 3500, todayLeft: 0 });
+  assert.deepEqual(quarter, { keep: 0.25, perDay: 750, save: 1750, todayLeft: 250 });
+  assert.deepEqual(all, { keep: 0, perDay: 1000, save: 0, todayLeft: 500 });
+  assert.deepEqual(pacePlans(-200, 300, 7), []); // nothing left: no plan
+});
+
+test("month spending by type, with money back netted out", () => {
+  const s = monthSpending([
+    { amount: 500, category_id: "food" },
+    { amount: 300, spend_type: "daily", category_id: "food" },
+    { amount: 3528, spend_type: "unplanned", category_id: "fees" },
+    { amount: -3528, spend_type: "unplanned", category_id: "fees" },
+    { amount: 6180, spend_type: "planned", category_id: "ins" },
+    { amount: -3000, spend_type: "daily", category_id: null },
+  ]);
+  assert.deepEqual(s, { everyday: 800, planned: 6180, unplanned: 3528, back: 6528, total: 800 + 6180 + 3528 - 6528 });
+});
+
+test("category change against the month before", () => {
+  const now = [
+    { amount: 900, category_id: "food" },
+    { amount: 400, category_id: "travel" },
+  ];
+  assert.deepEqual(categoryChange(now, [{ amount: 1200, category_id: "food" }]), [
+    { id: "food", amount: 900, before: 1200 },
+    { id: "travel", amount: 400, before: 0 },
+  ]);
+  assert.equal(categoryChange(now, null)[0].before, null);
+});
+
+test("pace plans ignore a negative 'today' (money back today adds to what's left instead)", () => {
+  assert.deepEqual(pacePlans(700, -3000, 7).at(-1), { keep: 0, perDay: 100, save: 0, todayLeft: 100 });
 });

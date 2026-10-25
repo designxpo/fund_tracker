@@ -60,7 +60,8 @@ export function SavingsCoach() {
   if (!m || m.salary <= 0) return null;
 
   const pct = (r: number) => Math.round(r * 100);
-  const saved = m.flow.saved;
+  const saved = m.netSaved;
+  const short = m.saved - m.netSaved;
   const toTarget = Math.max(0, m.target * m.salary - saved);
   const scale = Math.max(m.target * 1.4, m.rate, 0.01);
   const delta = m.lastRate == null ? null : pct(m.rate) - pct(m.lastRate);
@@ -73,12 +74,17 @@ export function SavingsCoach() {
         <div className="flex items-baseline gap-3">
           <p className="text-5xl font-bold tabular-nums tracking-tight text-good">{pct(m.rate)}%</p>
           {delta != null && (
-            <p className={`text-sm font-medium ${delta >= 0 ? "text-good" : "text-bad"}`}>
-              {delta >= 0 ? "▲" : "▼"} {Math.abs(delta)} pts vs last month
+            <p className={`text-sm font-medium ${delta === 0 ? "text-muted" : delta > 0 ? "text-good" : "text-bad"}`}>
+              {delta === 0 ? "same as last month" : `${delta > 0 ? "▲" : "▼"} ${Math.abs(delta)} pts vs last month`}
             </p>
           )}
         </div>
         <p className="text-sm text-muted">of your salary saved & invested · {inr(saved)}</p>
+        {short > 0 && (
+          <p className="text-xs text-bad">
+            {inr(m.saved)} invested, minus the {inr(short)} this salary is short (that comes out of savings).
+          </p>
+        )}
 
         <div className="relative mt-4 h-3 rounded-full bg-ink/10" role="img" aria-label={`${pct(m.rate)}% saved, target ${pct(m.target)}%`}>
           <div className="h-full rounded-full bg-good transition-[width] duration-300" style={{ width: `${Math.min(100, (m.rate / scale) * 100)}%` }} />
@@ -133,26 +139,16 @@ export function SavingsCoach() {
   );
 }
 
-/** Home: the savings rate and the most important nudge, every time the app opens. */
-export function CoachCard() {
+/** Home: the one most important tip, every time the app opens. */
+export function TopTip() {
   const m = useMoney();
   const { hidden, dismiss } = useDismissed(m?.cycleId);
-  if (!m || m.salary <= 0) return null;
-  const nudges = m.nudges.filter((n) => !hidden.has(n.id));
-  const top = nudges[0];
+  if (!m) return null;
+  const top = m.nudges.find((n) => !hidden.has(n.id));
+  if (!top) return null;
   return (
-    <section aria-label="Savings coach" className="space-y-2">
-      <Link href="/insights" className="flex items-center justify-between rounded-2xl bg-good/10 px-4 py-3 text-sm">
-        <span>
-          Saving <b className="text-good">{Math.round(m.rate * 100)}%</b> of salary · target <b>{Math.round(m.target * 100)}%</b>
-        </span>
-        <span className="text-xs text-muted">{nudges.length > 1 ? `${nudges.length} tips ›` : "Coach ›"}</span>
-      </Link>
-      {top && (
-        <ul>
-          <NudgeCard n={top} onDismiss={() => dismiss(top.id)} />
-        </ul>
-      )}
-    </section>
+    <ul aria-label="Tip">
+      <NudgeCard n={top} onDismiss={() => dismiss(top.id)} />
+    </ul>
   );
 }

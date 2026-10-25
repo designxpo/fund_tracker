@@ -12,6 +12,7 @@ const base: CoachInput = {
   daily: { dailyBudget: 1000, budgetToDate: 10000, spent: 10000, daysLeft: 20, budget: 30000 },
   overPlan: [],
   nextCardBill: 0,
+  overspentFunds: [],
   lastCardBillSameDay: null,
   categoryUp: null,
   topCategory: null,
@@ -67,6 +68,15 @@ test("saving less than planned, cost creep and a category spike", () => {
   assert.deepEqual(got, ["saved-short", "cat-up-Food", "creep-Subscriptions"]);
   // small changes are ignored
   assert.deepEqual(ids({ categoryUp: { name: "Food", now: 4300, before: 4000 }, overPlan: [{ name: "Gym", diff: 50 }] }), []);
+});
+
+test("a fund that paid out more than it had is flagged", () => {
+  const n = coachNudges({ ...base, overspentFunds: [{ name: "Surprise buffer", amount: 16555 }, { name: "Insurance", amount: 50 }] });
+  assert.deepEqual(
+    n.map((x) => x.id),
+    ["fund-red-Surprise buffer"],
+  );
+  assert.match(n[0].title, /₹16,555 spent beyond your Surprise buffer/);
 });
 
 test("card bill for next salary: a warning only when it grows", () => {

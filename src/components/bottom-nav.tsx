@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChartIcon, HomeIcon, MoreIcon, TargetIcon, WalletIcon } from "@/components/icons";
+import { ChartIcon, HistoryIcon, HomeIcon, MoreIcon, WalletIcon } from "@/components/icons";
 
+// Goals lives under More (it's opened less often than History).
 const TABS = [
-  { href: "/", label: "Home", Icon: HomeIcon },
-  { href: "/insights", label: "Insights", Icon: ChartIcon },
-  { href: "/salary", label: "Salary", Icon: WalletIcon },
-  { href: "/goals", label: "Goals", Icon: TargetIcon },
-  { href: "/more", label: "More", Icon: MoreIcon },
+  { href: "/", label: "Home", Icon: HomeIcon, also: [] as string[] },
+  { href: "/insights", label: "Insights", Icon: ChartIcon, also: [] },
+  { href: "/history", label: "History", Icon: HistoryIcon, also: [] },
+  { href: "/salary", label: "Salary", Icon: WalletIcon, also: [] },
+  { href: "/more", label: "More", Icon: MoreIcon, also: ["/goals"] },
 ];
 
 /** Floating glass capsule tab bar; content scrolls underneath it. */
@@ -18,8 +19,8 @@ export function BottomNav() {
   return (
     <nav className="fixed inset-x-0 bottom-[max(12px,env(safe-area-inset-bottom))] z-40 px-4">
       <ul className="glass-chrome mx-auto flex max-w-md rounded-[30px] p-1.5">
-        {TABS.map(({ href, label, Icon }) => {
-          const active = href === "/" ? path === "/" : path.startsWith(href);
+        {TABS.map(({ href, label, Icon, also }) => {
+          const active = href === "/" ? path === "/" : [href, ...also].some((p) => path.startsWith(p));
           return (
             <li key={href} className="flex-1">
               <Link

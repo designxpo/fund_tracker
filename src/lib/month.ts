@@ -127,34 +127,63 @@ export function planVsActual(
   return rows.filter((r) => r.plan !== 0 || r.actual !== 0);
 }
 
-export type FlowRow = { key: Bucket | "cardBill" | "cash"; label: string; amount: number };
+export type FundState = GoalKindRef & { name: string; available: number; locked?: boolean };
+export type LeftRow = { key: "bills" | "saved" | "setAside" | "spent" | "overspent"; label: string; amount: number };
 
 /**
- * Cash-flow view of one salary: what it actually paid. It pays last cycle's card bill (the daily part;
- * funds pay for planned/unplanned card spends) and this cycle's UPI/cash spends. This cycle's card
- * spends wait for the next salary.
+ * What's left of this salary until salary day:
+ * salary − bills & EMIs − saved & invested − set aside in funds − daily spending − what funds couldn't cover.
+ * Planned/unplanned spends come out of their funds first; only a fund in the red counts against the salary.
  */
-export function salaryCashFlow(
-  salary: number,
-  items: MonthItem[],
-  settlements: MonthSettlement[],
-  goals: GoalKindRef[],
-  paid: { cardBill: number; cash: number },
-) {
-  const u = salaryUtilisation(salary, 0, 0, items, settlements, goals);
-  const rows: FlowRow[] = [
-    ...u.rows.filter((r): r is UtilRow & { key: Bucket } => r.key !== "daily" && r.key !== "dailyLeft"),
-    { key: "cardBill", label: "Last cycle's card bill", amount: paid.cardBill },
-    { key: "cash", label: "Daily spends by UPI / cash", amount: paid.cash },
+export function moneyLeft(salary: number, items: MonthItem[], settlements: MonthSettlement[], funds: FundState[], dailySpent: number) {
+  const u = salaryUtilisation(salary, 0, dailySpent, items, settlements, funds);
+  const by = (k: UtilRow["key"]) => u.rows.find((r) => r.key === k)!.amount;
+  const overspent = funds.filter((f) => !f.locked && f.available < -0.5).map((f) => ({ name: f.name, amount: -f.available }));
+  const rows: LeftRow[] = [
+    { key: "bills", label: "Bills & EMIs", amount: by("emis") + by("fixed") },
+    { key: "saved", label: "Saved & invested", amount: u.saved },
+    { key: "setAside", label: "Set aside in funds", amount: u.setAside },
+    { key: "spent", label: "Spent", amount: dailySpent },
+    { key: "overspent", label: "Spent beyond your funds", amount: overspent.reduce((t, f) => t + f.amount, 0) },
   ];
-  const used = rows.reduce((t, r) => t + r.amount, 0);
-  const by = (k: FlowRow["key"]) => rows.find((r) => r.key === k)!.amount;
-  return {
-    rows,
-    used,
-    left: salary - used,
-    spent: by("emis") + by("fixed") + paid.cardBill + paid.cash,
-    saved: u.saved,
-    setAside: u.setAside,
+  return { rows, overspent, left: salary - rows.reduce((t, r) => t + r.amount, 0) };
+}
+
+export type PacePlan = { keep: number; perDay: number; save: number; todayLeft: number };
+
+/** Ways to use what's left until salary day (today included): save half, save a quarter, or spend it all. */
+export function pacePlans(left: number, todaySpent: number, daysLeft: number): PacePlan[] {
+  const today = Math.max(0, todaySpent);
+  const pool = left + today; // what there was for today onwards, before today's spends
+  if (left <= 0 || daysLeft <= 0) return [];
+  return [0.5, 0.25, 0].map((keep) => {
+    const perDay = keep ? Math.floor((pool * (1 - keep)) / daysLeft / 10) * 10 : Math.floor(pool / daysLeft);
+    return { keep, perDay, save: pool - perDay * daysLeft, todayLeft: perDay - today };
+  });
+}
+
+type SpendLite = { amount: number; spend_type?: string; category_id: string | null };
+
+/** A month's spending by type. Money back (refunds, cashback) is netted out of the total. */
+export function monthSpending(spends: SpendLite[]) {
+  const sum = (f: (s: SpendLite) => boolean) => spends.filter(f).reduce((t, s) => t + Number(s.amount), 0);
+  const everyday = sum((s) => (s.spend_type ?? "daily") === "daily" && s.amount > 0);
+  const planned = sum((s) => s.spend_type === "planned" && s.amount > 0);
+  const unplanned = sum((s) => s.spend_type === "unplanned" && s.amount > 0);
+  const back = -sum((s) => s.amount < 0);
+  return { everyday, planned, unplanned, back, total: everyday + planned + unplanned - back };
+}
+
+/** Category totals for a month, with the month before's for comparison (null: no earlier month). */
+export function categoryChange(now: SpendLite[], before: SpendLite[] | null) {
+  const totals = (list: SpendLite[]) => {
+    const m = new Map<string, number>();
+    list.forEach((s) => m.set(s.category_id ?? "none", (m.get(s.category_id ?? "none") ?? 0) + Number(s.amount)));
+    return m;
   };
+  const a = totals(now);
+  const b = before ? totals(before) : null;
+  return [...a.entries()]
+    .map(([id, amount]) => ({ id, amount, before: b ? (b.get(id) ?? 0) : null }))
+    .sort((x, y) => y.amount - x.amount);
 }

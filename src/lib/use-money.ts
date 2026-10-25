@@ -4,10 +4,22 @@ import { createClient } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store";
 import { ok, useData } from "@/lib/use-data";
 import { addDays, diffDays, salaryPromptDue } from "@/lib/budget";
-import { monthSummary, planVsActual, salaryCashFlow, salaryUtilisation, type GoalKindRef, type MonthItem, type MonthSettlement } from "@/lib/month";
+import { moneyLeft, monthSummary, pacePlans, planVsActual, salaryUtilisation, type MonthItem, type MonthSettlement } from "@/lib/month";
 import { coachNudges, savingsTarget } from "@/lib/coach";
+import type { FundSettle, SpendType } from "@/lib/types";
 
-export type HistSpend = { amount: number; card_id: string | null; spend_type: string; category_id: string | null; spent_on: string };
+export type HistSpend = {
+  id: string;
+  amount: number;
+  card_id: string | null;
+  spend_type: SpendType;
+  category_id: string | null;
+  spent_on: string;
+  note: string | null;
+  goal_id: string | null;
+  fund_settle: FundSettle;
+  created_at: string;
+};
 export type PastCycle = {
   id: string;
   starts_on: string;
@@ -24,7 +36,7 @@ export type MoneyHistory = { cycles: PastCycle[]; creditIds: string[] };
 async function fetchHistory(): Promise<MoneyHistory> {
   const sb = createClient();
   const [cycles, credit] = await Promise.all([
-    sb.from("cycles").select("id, starts_on, ends_on, salary, daily_budget").not("ends_on", "is", null).order("starts_on", { ascending: false }).limit(6).then(ok),
+    sb.from("cycles").select("id, starts_on, ends_on, salary, daily_budget").not("ends_on", "is", null).order("starts_on", { ascending: false }).limit(12).then(ok),
     sb.from("cards").select("id").gt("monthly_cap", 0).then(ok),
   ]);
   const list = cycles as { id: string; starts_on: string; ends_on: string; salary: unknown; daily_budget: unknown }[];
@@ -35,7 +47,14 @@ async function fetchHistory(): Promise<MoneyHistory> {
     sb.from("plan_items").select("cycle_id, name, kind, goal_id, planned, actual").in("cycle_id", ids).then(ok),
     sb.from("cycle_settlements").select("cycle_id, kind, goal_id, amount").in("cycle_id", ids).then(ok),
     ...list.map((c) =>
-      sb.from("spends").select("amount, card_id, spend_type, category_id, spent_on").gte("spent_on", c.starts_on).lte("spent_on", c.ends_on).limit(5000).then(ok),
+      sb
+        .from("spends")
+        .select("id, amount, card_id, spend_type, category_id, spent_on, note, goal_id, fund_settle, created_at")
+        .gte("spent_on", c.starts_on)
+        .lte("spent_on", c.ends_on)
+        .order("spent_on", { ascending: false })
+        .limit(5000)
+        .then(ok),
     ),
   ]);
   type R = { cycle_id: string; kind: string; goal_id: string | null; name: string; planned: unknown; actual: unknown; amount: unknown };
@@ -59,27 +78,17 @@ async function fetchHistory(): Promise<MoneyHistory> {
 }
 
 export function useMoneyHistory(cycleId: string | undefined) {
-  return useData("money-history-v2", fetchHistory, cycleId);
+  return useData("money-history-v3", fetchHistory, cycleId);
 }
 
 type SpendLike = { amount: number; card_id: string | null; spend_type?: string };
 const isDailyType = (s: { spend_type?: string }) => (s.spend_type ?? "daily") === "daily";
 const total = (list: { amount: number }[]) => list.reduce((t, s) => t + Number(s.amount), 0);
 
-/** Daily spends paid by credit card (on the card bill, paid from the next salary) vs by UPI/cash/debit. */
-export function splitByCard(spends: SpendLike[], credit: Set<string>) {
-  const daily = spends.filter(isDailyType);
-  const onCard = daily.filter((s) => !!s.card_id && credit.has(s.card_id));
-  return { card: total(onCard), cash: total(daily) - total(onCard) };
-}
+/** Everyday spends paid by credit card (they go on the bill the next salary pays). */
+const onCardDaily = (spends: SpendLike[], credit: Set<string>) => total(spends.filter((s) => isDailyType(s) && !!s.card_id && credit.has(s.card_id)));
 
-/** A closed cycle's numbers in the cash-flow view, given the cycle before it (for its card bill). */
-export function pastFlow(c: PastCycle, before: PastCycle | undefined, credit: Set<string>, goals: GoalKindRef[]) {
-  const bill = before && before.ends_on === addDays(c.starts_on, -1) ? splitByCard(before.spends, credit).card : 0;
-  return salaryCashFlow(c.salary, c.items, c.settlements, goals, { cardBill: bill, cash: splitByCard(c.spends, credit).cash });
-}
-
-/** This cycle's money: cash flow, budget view, savings rate and coach nudges, shared by Home and Insights. */
+/** This cycle's money: what's left until salary day, savings rate and coach nudges, shared by every screen. */
 export function useMoney() {
   const { cycle, summary, spends, planItems, settlements, goals, cards, categories, today } = useStore();
   const { data: hist } = useMoneyHistory(cycle?.id);
@@ -96,21 +105,23 @@ export function useMoney() {
   const prevContiguous = prev && prev.ends_on === addDays(start, -1) ? prev : undefined;
 
   const inCycle = spends.filter((s) => s.spent_on >= start && s.spent_on <= end);
-  const now = splitByCard(inCycle, credit);
-  const cardBill = prevContiguous ? splitByCard(prevContiguous.spends, credit).card : 0;
-  const flow = salaryCashFlow(salary, planItems, settlements, goals, { cardBill, cash: now.cash });
-  const util = salaryUtilisation(salary, dailyBudget * days, summary.cycle.spent, planItems, settlements, goals);
   const variance = planVsActual(planItems, settlements, goals, { budgetToDate: dailyBudget * elapsed, spent: summary.cycle.spent });
   const month = monthSummary(salary, dailyBudget * days, planItems, settlements);
+  const left = moneyLeft(salary, planItems, settlements, goals, summary.cycle.spent);
+  // Today's spending for the daily share: money back today adds to what's left instead.
+  const todayGross = inCycle.filter((s) => s.spent_on === today && isDailyType(s) && s.amount > 0).reduce((t, s) => t + Number(s.amount), 0);
+  const plans = pacePlans(left.left, todayGross, summary.cycle.daysLeft);
 
-  const pastRates = past.slice(-5).map((c, i, arr) => {
-    const before = past[past.length - arr.length + i - 1];
-    return c.salary > 0 ? pastFlow(c, before, credit, goals).saved / c.salary : 0;
-  });
+  const pastRates = past.slice(-5).map((c) => (c.salary > 0 ? salaryUtilisation(c.salary, 0, 0, c.items, c.settlements, goals).saved / c.salary : 0));
   const savedRow = variance.find((r) => r.key === "saved");
   const savedPlan = savedRow?.plan ?? 0;
   const target = savingsTarget(pastRates, salary > 0 ? savedPlan / salary : 0);
-  const rate = salary > 0 ? flow.saved / salary : 0;
+  // Savings net of any shortfall: if this salary ran short, the gap comes out of what was saved.
+  const saved = left.rows.find((r) => r.key === "saved")!.amount;
+  const netSaved = Math.max(0, saved - Math.max(0, -left.left));
+  const rate = salary > 0 ? netSaved / salary : 0;
+  // Everything on credit cards this cycle (any type): the bill the next salary pays.
+  const onCards = inCycle.filter((s) => !!s.card_id && credit.has(s.card_id)).reduce((t, s) => t + Number(s.amount), 0);
 
   // Same point last cycle: card spends and categories over the first `elapsed` days.
   const prevSameDay = prevContiguous?.spends.filter((s) => s.spent_on <= addDays(prevContiguous.starts_on, elapsed - 1));
@@ -132,15 +143,17 @@ export function useMoney() {
 
   const nudges = coachNudges({
     salary,
-    saved: flow.saved,
+    saved: netSaved,
     savedPlan,
     target,
     pastRates,
-    unallocated: month.result,
+    // Money "with no job": unplanned salary beyond what the daily budget still needs, after any fund overspend.
+    unallocated: month.result - left.rows.find((r) => r.key === "overspent")!.amount,
     daily: { dailyBudget, budgetToDate: dailyBudget * elapsed, spent: summary.cycle.spent, daysLeft: summary.cycle.daysLeft, budget: summary.cycle.budget },
     overPlan: month.variances.filter((v) => v.diff > 0 && ["loan", "fixed"].includes(planItems.find((i) => i.name === v.name)?.kind ?? "")),
-    nextCardBill: now.card,
-    lastCardBillSameDay: prevSameDay ? splitByCard(prevSameDay, credit).card : null,
+    nextCardBill: onCards,
+    overspentFunds: left.overspent,
+    lastCardBillSameDay: prevSameDay ? onCardDaily(prevSameDay, credit) : null,
     categoryUp,
     topCategory: top ? { name: top[0], amount: top[1] } : null,
     lastCycle: prevContiguous
@@ -158,15 +171,20 @@ export function useMoney() {
     days,
     elapsed,
     nextSalaryOn: addDays(end, 1),
-    flow,
-    util,
-    variance,
-    cardBill,
-    nextCardBill: now.card,
+    daysLeft: summary.cycle.daysLeft,
+    todaySpent: todayGross,
+    /** what's left of this salary until salary day, and how it was used */
+    left,
+    /** save half / a quarter / nothing of what's left, per day */
+    plans,
+    budgetToDate: dailyBudget * elapsed,
+    /** saved & invested from this salary, and the same net of any shortfall */
+    saved,
+    netSaved,
+    nextCardBill: onCards,
     rate,
     lastRate: pastRates.at(-1) ?? null,
     target,
     nudges,
-    historyLoaded: !!hist,
   };
 }

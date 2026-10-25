@@ -7,14 +7,14 @@ const password = process.env.E2E_PASSWORD;
 
 test.skip(!email || !password, "set E2E_EMAIL and E2E_PASSWORD to run");
 
-test("log a spend and see 'left today' update, then delete it", async ({ page }) => {
+test("log a spend and see 'left until salary day' update, then delete it", async ({ page }) => {
   await page.goto("/login");
   await page.getByPlaceholder("you@email.com").fill(email!);
   await page.getByPlaceholder("Password").fill(password!);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByText("Left today")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Left until salary day")).toBeVisible({ timeout: 15_000 });
 
-  const leftBefore = await page.locator("section", { hasText: "Left today" }).locator("p[aria-live]").innerText();
+  const leftBefore = await page.getByRole("region", { name: "Left until salary day" }).locator("p[aria-live]").innerText();
 
   await page.getByRole("button", { name: "Add spend" }).click();
   await page.getByRole("dialog").locator("input[inputmode=decimal]").first().fill("1");
@@ -22,7 +22,7 @@ test("log a spend and see 'left today' update, then delete it", async ({ page })
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("status").filter({ hasText: "₹1 · Other" })).toBeVisible();
 
-  const leftAfter = await page.locator("section", { hasText: "Left today" }).locator("p[aria-live]").innerText();
+  const leftAfter = await page.getByRole("region", { name: "Left until salary day" }).locator("p[aria-live]").innerText();
   expect(leftAfter).not.toBe(leftBefore);
 
   // clean up: swipe the newest ₹1 row left to delete it

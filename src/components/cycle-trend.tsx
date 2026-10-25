@@ -4,52 +4,51 @@ import { Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveConta
 import { useStore } from "@/lib/store";
 import { parseYmd } from "@/lib/budget";
 import { inr } from "@/lib/money";
-import { pastFlow, useMoney, useMoneyHistory } from "@/lib/use-money";
-import type { FlowRow } from "@/lib/month";
-import { BUCKET_COLORS } from "@/components/money-overview";
+import { useMoney, useMoneyHistory } from "@/lib/use-money";
+import { moneyLeft, type LeftRow } from "@/lib/month";
+import { LEFT_COLORS } from "@/components/money-overview";
 
-const SERIES = ["emis", "fixed", "saved", "setAside", "cardBill", "cash"] as const;
+const SERIES = ["bills", "saved", "setAside", "spent", "overspent"] as const;
 const LABELS: Record<(typeof SERIES)[number], string> = {
-  emis: "EMIs & loan",
-  fixed: "Fixed costs",
+  bills: "Bills & EMIs",
   saved: "Saved & invested",
   setAside: "Set aside",
-  cardBill: "Card bill",
-  cash: "UPI / cash",
+  spent: "Spent",
+  overspent: "Beyond funds",
 };
 
 type Row = Record<(typeof SERIES)[number], number> & { label: string; salary: number; left: number };
 
-/** Month by month: what each salary paid (cash flow), stacked, with the salary as a dashed line. */
+/** Month by month: how each salary was used, stacked, with the salary as a dashed line. */
 export function CycleTrend() {
-  const { cycle, cards, goals } = useStore();
+  const { cycle, goals } = useStore();
   const { data: history, loading, error } = useMoneyHistory(cycle?.id);
   const m = useMoney();
   if (!cycle || !m) return null;
 
-  const credit = new Set([...cards.filter((c) => c.monthly_cap > 0).map((c) => c.id), ...(history?.creditIds ?? [])]);
-  const toRow = (label: string, salary: number, f: { rows: FlowRow[]; left: number }): Row => {
+  const toRow = (label: string, salary: number, f: { rows: LeftRow[]; left: number }): Row => {
     const amount = (k: (typeof SERIES)[number]) => Math.max(0, f.rows.find((r) => r.key === k)!.amount);
     return {
       label,
       salary,
       left: f.left,
-      emis: amount("emis"),
-      fixed: amount("fixed"),
+      bills: amount("bills"),
       saved: amount("saved"),
       setAside: amount("setAside"),
-      cardBill: amount("cardBill"),
-      cash: amount("cash"),
+      spent: amount("spent"),
+      overspent: amount("overspent"),
     };
   };
   const month = (d: string) => parseYmd(d).toLocaleDateString("en-IN", { month: "short" });
-  const past = history?.cycles ?? [];
-  // The oldest fetched cycle only supplies the card bill for the one after it.
-  const shown = past.length > 5 ? past.slice(1) : past;
+  // Past months: everyday spending only (how far funds were overdrawn back then isn't kept).
   const rows: Row[] = [
-    ...shown.map((c) => toRow(month(c.starts_on), c.salary, pastFlow(c, past[past.indexOf(c) - 1], credit, goals))),
-    toRow(`${month(cycle.starts_on)} (now)`, m.salary, m.flow),
+    ...(history?.cycles ?? []).slice(-5).map((c) => {
+      const daily = c.spends.filter((s) => (s.spend_type ?? "daily") === "daily").reduce((t, s) => t + s.amount, 0);
+      return toRow(month(c.starts_on), c.salary, moneyLeft(c.salary, c.items, c.settlements, goals.map((g) => ({ ...g, available: 0 })), daily));
+    }),
+    toRow(`${month(cycle.starts_on)} (now)`, m.salary, m.left),
   ];
+  const series = SERIES.filter((k) => k !== "overspent" || rows.some((r) => r.overspent > 0));
 
   return (
     <section aria-label="Month by month" className="rounded-2xl bg-surface p-4 shadow-sm">
@@ -75,8 +74,8 @@ export function CycleTrend() {
                   tickFormatter={(v: number) => (v >= 1000 ? `₹${Math.round(v / 1000)}k` : `₹${v}`)}
                 />
                 <Tooltip cursor={{ fill: "var(--line)", opacity: 0.5 }} content={<TrendTip />} />
-                {SERIES.map((k) => (
-                  <Bar key={k} dataKey={k} name={LABELS[k]} stackId="s" fill={BUCKET_COLORS[k]} stroke="var(--surface-solid)" strokeWidth={1} />
+                {series.map((k) => (
+                  <Bar key={k} dataKey={k} name={LABELS[k]} stackId="s" fill={LEFT_COLORS[k]} stroke="var(--surface-solid)" strokeWidth={1} />
                 ))}
                 {rows.length > 1 ? (
                   <Line
@@ -104,9 +103,9 @@ export function CycleTrend() {
             </ResponsiveContainer>
           </div>
           <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
-            {SERIES.map((k) => (
+            {series.map((k) => (
               <li key={k} className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: BUCKET_COLORS[k] }} />
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: LEFT_COLORS[k] }} />
                 {LABELS[k]}
               </li>
             ))}
@@ -133,14 +132,14 @@ export function CycleTrend() {
                     <tr key={r.label}>
                       <td className="py-1">{r.label}</td>
                       <td className="text-right">{inr(r.salary)}</td>
-                      <td className="text-right">{inr(r.emis + r.fixed + r.cardBill + r.cash)}</td>
+                      <td className="text-right">{inr(r.bills + r.spent + r.overspent)}</td>
                       <td className="text-right text-good">{inr(r.saved + r.setAside)}</td>
                       <td className={`text-right ${r.left < 0 ? "text-bad" : ""}`}>{inr(r.left)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <p className="mt-1 text-muted">*Saved & invested plus set aside. Each salary pays the card bill of the cycle before it. Current cycle is so far.</p>
+              <p className="mt-1 text-muted">*Saved & invested plus set aside. Spent includes bills & EMIs. This month is so far.</p>
             </div>
           </details>
         </>
@@ -160,9 +159,9 @@ function TrendTip({ active, payload }: { active?: boolean; payload?: { payload: 
         {r.label} · salary {inr(r.salary)}
       </p>
       <ul className="space-y-0.5">
-        {[...SERIES].reverse().map((k) => (
+        {[...SERIES].reverse().filter((k) => k !== "overspent" || r.overspent > 0).map((k) => (
           <li key={k} className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full" style={{ background: BUCKET_COLORS[k] }} />
+            <span className="h-2 w-2 rounded-full" style={{ background: LEFT_COLORS[k] }} />
             <span className="flex-1">{LABELS[k]}</span>
             <span className="tabular-nums">{inr(r[k])}</span>
           </li>
