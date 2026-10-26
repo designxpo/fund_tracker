@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store";
 import { ok, useData } from "@/lib/use-data";
 import { addDays, diffDays, salaryPromptDue } from "@/lib/budget";
-import { moneyLeft, monthSummary, pacePlans, planVsActual, salaryUtilisation, type MonthItem, type MonthSettlement } from "@/lib/month";
+import { moneyLeft, monthSummary, overLimits, pacePlans, planVsActual, salaryUtilisation, type MonthItem, type MonthSettlement } from "@/lib/month";
 import { coachNudges, savingsTarget } from "@/lib/coach";
 import type { FundSettle, SpendType } from "@/lib/types";
 
@@ -112,6 +112,24 @@ export function useMoney() {
   const todayGross = inCycle.filter((s) => s.spent_on === today && isDailyType(s) && s.amount > 0).reduce((t, s) => t + Number(s.amount), 0);
   const plans = pacePlans(left.left, todayGross, summary.cycle.daysLeft);
 
+  // Every limit gone over this month, with what's behind it (net of money back).
+  const sumBy = (list: typeof inCycle, key: (s: (typeof inCycle)[number]) => string | null) =>
+    list.reduce<Record<string, number>>((acc, s) => {
+      const k = key(s);
+      if (k) acc[k] = (acc[k] ?? 0) + Number(s.amount);
+      return acc;
+    }, {});
+  const over = overLimits({
+    funds: goals,
+    fundSpent: sumBy(inCycle.filter((s) => !isDailyType(s)), (s) => s.goal_id ?? null),
+    cards,
+    cardSpent: sumBy(inCycle, (s) => s.card_id),
+    daily: { spent: summary.cycle.spent, budgetToDate: dailyBudget * elapsed },
+    bills: planItems
+      .filter((i) => (i.kind === "loan" || i.kind === "fixed") && i.actual != null)
+      .map((i) => ({ name: i.name, planned: Number(i.planned), actual: Number(i.actual) })),
+  });
+
   const pastRates = past.slice(-5).map((c) => (c.salary > 0 ? salaryUtilisation(c.salary, 0, 0, c.items, c.settlements, goals).saved / c.salary : 0));
   const savedRow = variance.find((r) => r.key === "saved");
   const savedPlan = savedRow?.plan ?? 0;
@@ -177,6 +195,8 @@ export function useMoney() {
     left,
     /** save half / a quarter / nothing of what's left, per day */
     plans,
+    /** limits gone over this month, biggest first */
+    over,
     budgetToDate: dailyBudget * elapsed,
     /** saved & invested from this salary, and the same net of any shortfall */
     saved,

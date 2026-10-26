@@ -144,7 +144,7 @@ export function moneyLeft(salary: number, items: MonthItem[], settlements: Month
     { key: "saved", label: "Saved & invested", amount: u.saved },
     { key: "setAside", label: "Set aside in funds", amount: u.setAside },
     { key: "spent", label: "Spent", amount: dailySpent },
-    { key: "overspent", label: "Spent beyond your funds", amount: overspent.reduce((t, f) => t + f.amount, 0) },
+    { key: "overspent", label: "Overspent", amount: overspent.reduce((t, f) => t + f.amount, 0) },
   ];
   return { rows, overspent, left: salary - rows.reduce((t, r) => t + r.amount, 0) };
 }
@@ -186,4 +186,48 @@ export function categoryChange(now: SpendLite[], before: SpendLite[] | null) {
   return [...a.entries()]
     .map(([id, amount]) => ({ id, amount, before: b ? (b.get(id) ?? 0) : null }))
     .sort((x, y) => y.amount - x.amount);
+}
+
+export type OverItem = {
+  key: string;
+  kind: "fund" | "card" | "daily" | "bill";
+  /** goal id (fund) or card id (card) the spends behind it can be found by */
+  ref: string | null;
+  title: string;
+  spent: number;
+  limit: number;
+  over: number;
+};
+
+/**
+ * Every limit this month went over, biggest first: a fund (Surprise buffer, sinking fund) that paid out more
+ * than it had, a card past its monthly cap (everything on the card counts), everyday spending past the budget
+ * so far, and a bill or EMI that cost more than planned.
+ */
+export function overLimits(i: {
+  funds: { id: string; name: string; kind?: string | null; role?: string | null; available: number; locked?: boolean }[];
+  fundSpent: Record<string, number>;
+  cards: { id: string; nickname: string; monthly_cap: number }[];
+  cardSpent: Record<string, number>;
+  daily: { spent: number; budgetToDate: number };
+  bills: { name: string; planned: number; actual: number }[];
+}): OverItem[] {
+  const out: OverItem[] = [];
+  for (const f of i.funds) {
+    if (f.locked || f.available >= -0.5) continue;
+    const spent = i.fundSpent[f.id] ?? 0;
+    const over = -f.available;
+    const buffer = f.kind === "buffer" || f.role === "buffer";
+    out.push({ key: `fund-${f.id}`, kind: "fund", ref: f.id, title: buffer ? "Unplanned spends" : `${f.name} (planned)`, spent, limit: Math.max(0, spent - over), over });
+  }
+  for (const c of i.cards) {
+    const spent = i.cardSpent[c.id] ?? 0;
+    if (c.monthly_cap > 0 && spent - c.monthly_cap >= 1)
+      out.push({ key: `card-${c.id}`, kind: "card", ref: c.id, title: c.nickname, spent, limit: c.monthly_cap, over: spent - c.monthly_cap });
+  }
+  if (i.daily.spent - i.daily.budgetToDate >= 1)
+    out.push({ key: "daily", kind: "daily", ref: null, title: "Everyday spending", spent: i.daily.spent, limit: i.daily.budgetToDate, over: i.daily.spent - i.daily.budgetToDate });
+  for (const b of i.bills)
+    if (b.actual - b.planned >= 1) out.push({ key: `bill-${b.name}`, kind: "bill", ref: null, title: b.name, spent: b.actual, limit: b.planned, over: b.actual - b.planned });
+  return out.sort((a, b) => b.over - a.over);
 }

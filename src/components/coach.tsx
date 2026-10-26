@@ -138,17 +138,3 @@ export function SavingsCoach() {
     </>
   );
 }
-
-/** Home: the one most important tip, every time the app opens. */
-export function TopTip() {
-  const m = useMoney();
-  const { hidden, dismiss } = useDismissed(m?.cycleId);
-  if (!m) return null;
-  const top = m.nudges.find((n) => !hidden.has(n.id));
-  if (!top) return null;
-  return (
-    <ul aria-label="Tip">
-      <NudgeCard n={top} onDismiss={() => dismiss(top.id)} />
-    </ul>
-  );
-}

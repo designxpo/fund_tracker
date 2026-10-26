@@ -92,8 +92,8 @@ export function coachNudges(i: CoachInput): Nudge[] {
       id: `fund-red-${worst.name}`,
       tone: "warn",
       priority: 88,
-      title: `${rs(worst.amount)} spent beyond your ${worst.name}`,
-      body: `It paid out more than it had, so the rest comes out of this salary. Keep "Unplanned" for real surprises, and go lean until salary day.`,
+      title: `${rs(worst.amount)} more spent from ${worst.name} than it had`,
+      body: `The rest comes out of this salary. Keep "Unplanned" for real surprises (log regular buys as Daily), and go lean until salary day.`,
       href: "/insights",
     });
 

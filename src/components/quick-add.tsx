@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { flushSync } from "react-dom";
 import { useStore } from "@/lib/store";
 import { useToast } from "@/components/toast";
-import { addDays, cycleEnd, dailyOnly, isBirthdayWindow, parseYmd, sumBetween, suggestCardId } from "@/lib/budget";
+import { addDays, cycleEnd, isBirthdayWindow, parseYmd, sumBetween, suggestCardId } from "@/lib/budget";
 import { rpc } from "@/lib/rpc";
 import { CapConfirm, CoverDialog, Segmented } from "@/components/quick-add/parts";
 import { inr } from "@/lib/money";
@@ -171,7 +171,8 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
     money && amt > 0 && spendType === "daily" ? money.left.left - signed + (editing && isDaily(editing) ? Number(editing.amount) : 0) : null;
 
   // Would this spend push the chosen card past its monthly cap?
-  const capSpends = dailyOnly(spends.filter((s) => s.id !== editing?.id));
+  // The monthly cap counts everything on the card (any spend type, net of money back).
+  const capSpends = spends.filter((s) => s.id !== editing?.id);
   const cardSpentBefore =
     card && cycle
       ? sumBetween(
@@ -181,7 +182,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
           card.id,
         )
       : 0;
-  const overCap = !refund && spendType === "daily" && !!card && card.monthly_cap > 0 && cardSpentBefore + amt > card.monthly_cap;
+  const overCap = !refund && !!card && card.monthly_cap > 0 && cardSpentBefore + amt > card.monthly_cap;
   const overKey = `${cardId}:${amt}`;
   const needsConfirm = overCap && confirmedKey !== overKey;
   const switchTo = overCap

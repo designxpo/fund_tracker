@@ -76,7 +76,7 @@ test("a fund that paid out more than it had is flagged", () => {
     n.map((x) => x.id),
     ["fund-red-Surprise buffer"],
   );
-  assert.match(n[0].title, /₹16,555 spent beyond your Surprise buffer/);
+  assert.match(n[0].title, /₹16,555 more spent from Surprise buffer than it had/);
 });
 
 test("card bill for next salary: a warning only when it grows", () => {

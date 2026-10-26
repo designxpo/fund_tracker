@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { categoryChange, moneyLeft, monthSpending, monthSummary, pacePlans, planVsActual, salaryUtilisation, type MonthItem } from "./month.ts";
+import { categoryChange, moneyLeft, overLimits, monthSpending, monthSummary, pacePlans, planVsActual, salaryUtilisation, type MonthItem } from "./month.ts";
 
 // Example persona's checklist (amounts are what was entered on Salary Day).
 const items: MonthItem[] = [
@@ -138,4 +138,40 @@ test("category change against the month before", () => {
 
 test("pace plans ignore a negative 'today' (money back today adds to what's left instead)", () => {
   assert.deepEqual(pacePlans(700, -3000, 7).at(-1), { keep: 0, perDay: 100, save: 0, todayLeft: 100 });
+});
+
+test("over the limit: funds, card caps, everyday budget and bills, biggest first", () => {
+  const items = overLimits({
+    funds: [
+      { id: "buf", name: "Surprise buffer", kind: "buffer", available: -16055 },
+      { id: "ins", name: "Insurance", kind: "sinking", available: -880 },
+      { id: "em", name: "Emergency fund", kind: "savings", available: 40000 },
+      { id: "cash", name: "Cash", kind: "savings", available: -5, locked: true },
+    ],
+    fundSpent: { buf: 17555, ins: 6180 },
+    cards: [
+      { id: "sbi", nickname: "SBI Card", monthly_cap: 15000 },
+      { id: "upi", nickname: "UPI", monthly_cap: 0 },
+    ],
+    cardSpent: { sbi: 18000, upi: 50000 },
+    daily: { spent: 4300, budgetToDate: 4000 },
+    bills: [
+      { name: "Subscriptions", planned: 1000, actual: 1400 },
+      { name: "Rent", planned: 5000, actual: 5000 },
+    ],
+  });
+  assert.deepEqual(
+    items.map((x) => [x.title, x.spent, x.limit, x.over]),
+    [
+      ["Unplanned spends", 17555, 1500, 16055],
+      ["SBI Card", 18000, 15000, 3000],
+      ["Insurance (planned)", 6180, 5300, 880],
+      ["Subscriptions", 1400, 1000, 400],
+      ["Everyday spending", 4300, 4000, 300],
+    ],
+  );
+});
+
+test("nothing over: no items", () => {
+  assert.deepEqual(overLimits({ funds: [], fundSpent: {}, cards: [], cardSpent: {}, daily: { spent: 10, budgetToDate: 100 }, bills: [] }), []);
 });

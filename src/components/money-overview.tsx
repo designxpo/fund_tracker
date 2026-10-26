@@ -5,11 +5,10 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store";
 import { ok, useData } from "@/lib/use-data";
-import { addDays, capLevel, parseYmd } from "@/lib/budget";
+import { capLevel, parseYmd } from "@/lib/budget";
 import { inr } from "@/lib/money";
-import { bucketOf, monthSpending, type Bucket, type LeftRow } from "@/lib/month";
-import { big, lumpValue } from "@/lib/coach";
-import { useMoney, useMoneyHistory } from "@/lib/use-money";
+import { bucketOf, categoryChange, monthSpending, type Bucket, type LeftRow } from "@/lib/month";
+import { useMoney } from "@/lib/use-money";
 import { CardMatch } from "@/components/card-match";
 import { useQuickAdd } from "@/components/quick-add";
 import { isDaily, type Card, type Spend } from "@/lib/types";
@@ -41,144 +40,203 @@ function SalaryBar({ rows, salary, className = "h-4" }: { rows: LeftRow[]; salar
   );
 }
 
-/** The "save before salary day" choice for this cycle (this device only). Defaults to saving a quarter. */
-function usePace(cycleId: string | undefined) {
-  const key = `pace:${cycleId}`;
-  const [picked, setPicked] = useState<Record<string, number>>({});
-  const stored = () => {
-    try {
-      const v = typeof window === "undefined" ? null : localStorage.getItem(key);
-      return v == null ? 0.25 : Number(v);
-    } catch {
-      return 0.25;
-    }
-  };
-  const keep = picked[key] ?? stored();
-  const choose = (k: number) => {
-    setPicked((p) => ({ ...p, [key]: k }));
-    try {
-      localStorage.setItem(key, String(k));
-    } catch {}
-  };
-  return [keep, choose] as const;
-}
-
-/** Home: what's left of this salary, how many days it has to last, today's share, and how much to save. */
-export function UntilSalary() {
-  const m = useMoney();
-  const [keep, setKeep] = usePace(m?.cycleId);
-  if (!m) return null;
-
-  const { left, plans, daysLeft, todaySpent, salary } = m;
-  const L = left.left;
-  const plan = plans.find((p) => p.keep === keep) ?? plans.at(-1);
-  const worst = [...left.overspent].sort((a, b) => b.amount - a.amount)[0];
-  const usedPct = salary > 0 ? Math.min(100, ((salary - Math.max(0, L)) / salary) * 100) : 100;
-
+/** Home: today's everyday spending against the daily budget. */
+export function TodayCard() {
+  const { summary, cycle } = useStore();
+  if (!summary || !cycle) return null;
+  const daily = Number(cycle.daily_budget);
+  const spent = summary.todaySpent; // everyday spends today, net of money back
+  const left = daily - spent;
   return (
-    <>
-      <section aria-label="Left until salary day" className="glass-hero rounded-[28px] p-5">
-        <p className="text-sm text-muted">Left until salary day</p>
-        <p className="mt-1 text-5xl font-bold tabular-nums tracking-tight" style={{ color: L >= 0 ? "var(--good)" : "var(--bad)" }} aria-live="polite">
-          {signed(L)}
-        </p>
-        <p className="mt-1 text-sm text-muted">
-          {daysLeft <= 1 ? "Last day before salary" : `${daysLeft} days to go`} · salary on {shortDate(m.nextSalaryOn)}
-        </p>
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink/10">
-          <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${usedPct}%`, background: L >= 0 ? "var(--good)" : "var(--bad)" }} />
-        </div>
-        <p className="mt-1 text-xs text-muted">
-          {pctOf(salary - L, salary)}% of your {inr(salary)} salary used
-        </p>
-
-        {plan ? (
-          <div className="mt-3 flex items-baseline justify-between gap-2 rounded-2xl bg-white/60 px-3 py-2.5 text-sm">
-            <span>
-              Today <span className="text-muted">· spent {inr(todaySpent)} of {inr(plan.perDay)}</span>
-            </span>
-            <b className={`tabular-nums ${plan.todayLeft >= 0 ? "text-good" : "text-bad"}`}>
-              {plan.todayLeft >= 0 ? `${inr(plan.todayLeft)} left` : `${inr(-plan.todayLeft)} over`}
-            </b>
-          </div>
-        ) : (
-          <div className="mt-3 rounded-2xl bg-bad/10 px-3 py-2.5 text-sm text-bad">
-            <p>
-              {L < 0 ? `This salary is ${inr(-L)} short.` : "Nothing left for the coming days."} Spend only on essentials until salary day
-              {L < 0 ? "; the gap comes out of your savings" : ""}.
-            </p>
-            {worst && (
-              <p className="mt-1 text-xs">
-                Biggest reason: {worst.name} paid out {inr(worst.amount)} more than it had.
-              </p>
-            )}
-          </div>
-        )}
-      </section>
-
-      {plans.length > 0 && (
-        <section aria-label="Save before salary day" className="rounded-2xl bg-surface p-4 shadow-sm">
-          <h2 className="text-sm font-semibold">Save before salary day</h2>
-          <p className="text-xs text-muted">How much of the {inr(L)} do you want to keep? Today&apos;s limit above follows your pick.</p>
-          <div role="radiogroup" aria-label="How much to save" className="mt-3 grid grid-cols-3 gap-2">
-            {plans.map((p) => {
-              const on = p.keep === plan?.keep;
-              return (
-                <button
-                  key={p.keep}
-                  role="radio"
-                  aria-checked={on}
-                  onClick={() => setKeep(p.keep)}
-                  className={`rounded-2xl border px-2 py-2.5 text-center transition active:scale-[.98] ${
-                    on ? "border-navy bg-navy text-white shadow-[0_6px_16px_-8px_rgba(20,38,79,.7)]" : "border-white/80 bg-white/60 text-ink"
-                  }`}
-                >
-                  <span className={`block text-xs ${on ? "text-white/80" : "text-muted"}`}>{p.keep ? `Save ${p.keep * 100}%` : "Spend it all"}</span>
-                  <span className="block font-semibold tabular-nums">{inr(p.perDay)}/day</span>
-                  <span className={`block text-xs tabular-nums ${on ? "text-white/80" : "text-good"}`}>{p.keep ? `saves ${inr(p.save)}` : "saves ₹0"}</span>
-                </button>
-              );
-            })}
-          </div>
-          {plan && plan.keep > 0 && (
-            <p className="mt-2 text-xs text-muted">
-              On salary day, move the {inr(plan.save)} to investments. In 10 years it could be {big(lumpValue(plan.save, 10))}.
-            </p>
-          )}
-        </section>
-      )}
-    </>
+    <section aria-label="Today" className="glass-hero rounded-[28px] p-5">
+      <p className="text-sm text-muted">Spent today</p>
+      <p className="mt-1 text-5xl font-bold tabular-nums tracking-tight" aria-live="polite">
+        {inr(Math.max(0, spent))}
+      </p>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink/10">
+        <div
+          className="h-full rounded-full transition-[width] duration-300"
+          style={{ width: `${Math.min(100, Math.max(0, (spent / daily) * 100))}%`, background: left >= 0 ? "var(--good)" : "var(--bad)" }}
+        />
+      </div>
+      <p className="mt-2 text-sm">
+        <b className={left >= 0 ? "text-good" : "text-bad"}>{left >= 0 ? `${inr(left)} left` : `${inr(-left)} over`}</b>
+        <span className="text-muted"> of your {inr(daily)} daily budget</span>
+      </p>
+      {spent < 0 && <p className="text-xs text-good">+{inr(-spent)} money back today</p>}
+    </section>
   );
 }
 
-/** Home: this month's spending so far, against last month by the same day. Opens History. */
-export function MonthSnapshot() {
-  const { cycle, spends } = useStore();
-  const { data: hist } = useMoneyHistory(cycle?.id);
+/** Spends behind a row, biggest first; tap one to edit it (or mark it refunded). */
+function SpendList({ list }: { list: Spend[] }) {
+  const { cards, categories } = useStore();
+  const { open } = useQuickAdd();
+  const sorted = [...list].sort((a, b) => b.amount - a.amount);
+  return (
+    <ul className="mt-1.5 space-y-0.5 border-l border-line pl-3 text-xs">
+      {sorted.map((s) => {
+        const c = categories.find((x) => x.id === s.category_id);
+        return (
+          <li key={s.id}>
+            <button onClick={() => open(s)} className="flex min-h-8 w-full justify-between gap-2 text-left">
+              <span className="truncate text-muted">
+                {shortDate(s.spent_on)} · {s.note || c?.name || (s.amount < 0 ? "Money back" : "Other")}
+                {cards.find((x) => x.id === s.card_id) ? ` · ${cards.find((x) => x.id === s.card_id)!.nickname}` : ""}
+              </span>
+              <span className={`shrink-0 tabular-nums ${s.amount < 0 ? "text-good" : ""}`}>{money(Number(s.amount))}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+const LIMIT_LABEL = { fund: "set aside", card: "monthly cap", daily: "budget so far", bill: "planned" } as const;
+
+/** Home: every limit this month went over, in plain words, each opening to the spends behind it. */
+export function OverLimits() {
+  const { spends } = useStore();
   const m = useMoney();
   if (!m) return null;
-  const now = monthSpending(spends.filter((s) => s.spent_on >= m.start && s.spent_on <= m.end));
-  const prev = hist?.cycles.at(-1);
-  const before = prev ? monthSpending(prev.spends.filter((s) => s.spent_on <= addDays(prev.starts_on, m.elapsed - 1))).total : null;
-  const delta = before == null ? null : now.total - before;
-  const prevName = prev ? parseYmd(prev.starts_on).toLocaleDateString("en-IN", { month: "short" }) : "";
+  if (!m.over.length)
+    return <p className="rounded-2xl bg-good/10 px-4 py-3 text-sm font-medium text-good">✓ Within all your limits this month</p>;
+  const inCycle = spends.filter((s) => s.spent_on >= m.start && s.spent_on <= m.end);
+  const behind = (o: (typeof m.over)[number]) =>
+    o.kind === "fund"
+      ? inCycle.filter((s) => !isDaily(s) && s.goal_id === o.ref)
+      : o.kind === "card"
+        ? inCycle.filter((s) => s.card_id === o.ref)
+        : o.kind === "daily"
+          ? inCycle.filter(isDaily)
+          : [];
+  const total = m.over.reduce((t, o) => t + o.over, 0);
+
   return (
-    <Link href="/history" className="block rounded-2xl bg-surface p-4 shadow-sm">
+    <section aria-label="Where you went over" className="rounded-2xl bg-bad/[.06] p-4 ring-1 ring-bad/15">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold">Spent this month</h2>
-        <span className="text-xs text-muted">History ›</span>
+        <h2 className="text-sm font-semibold text-bad">Where you went over</h2>
+        <span className="text-xs text-muted">tap to see why</span>
       </div>
-      <p className="mt-1 text-2xl font-bold tabular-nums">{inr(now.total)}</p>
-      {delta != null && Math.abs(delta) >= 1 && (
-        <p className={`text-sm ${delta > 0 ? "text-bad" : "text-good"}`}>
-          {delta > 0 ? "▲" : "▼"} {inr(Math.abs(delta))} {delta > 0 ? "more" : "less"} than {prevName} by this day
+      <ul className="mt-1 divide-y divide-bad/10">
+        {m.over.map((o) => {
+          const list = behind(o);
+          return (
+            <li key={o.key}>
+              <details className="group py-2.5">
+                <summary className="flex cursor-pointer list-none items-center gap-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium">{o.title}</span>
+                    <span className="block text-xs text-muted">
+                      {inr(o.spent)} spent · {inr(o.limit)} {LIMIT_LABEL[o.kind]}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-bad">{inr(o.over)} over</span>
+                  <span aria-hidden className="text-muted transition group-open:rotate-90">
+                    ›
+                  </span>
+                </summary>
+                {o.kind === "fund" && (
+                  <p className="mt-1 text-xs text-muted">
+                    These were logged as {o.title.startsWith("Unplanned") ? "Unplanned" : "Planned"}, but more was spent than you&apos;d set aside, so the rest comes out of
+                    your salary.
+                  </p>
+                )}
+                {o.kind === "card" && <p className="mt-1 text-xs text-muted">Everything you put on this card this month.</p>}
+                {o.kind === "bill" && <p className="mt-1 text-xs text-muted">This bill cost more than planned on Salary Day.</p>}
+                {list.length > 0 && <SpendList list={list} />}
+              </details>
+            </li>
+          );
+        })}
+      </ul>
+      {m.over.length > 1 && (
+        <p className="mt-1 text-xs text-muted">
+          {m.over.length} limits over, {inr(total)} in all (some spends count in more than one, e.g. a card and a fund).
         </p>
       )}
-      <p className="mt-1 text-xs text-muted">
-        Everyday {inr(now.everyday)} · Planned {inr(now.planned)} · Unplanned {inr(now.unplanned)}
-        {now.back > 0 ? ` · Money back +${inr(now.back)}` : ""}
-      </p>
-    </Link>
+    </section>
+  );
+}
+
+/** Home: this month's total, what's left of the salary, and where the money went by category. */
+export function MonthCard() {
+  const { spends, categories } = useStore();
+  const m = useMoney();
+  if (!m) return null;
+  const inCycle = spends.filter((s) => s.spent_on >= m.start && s.spent_on <= m.end);
+  const s = monthSpending(inCycle);
+  const cats = categoryChange(inCycle, null).filter((c) => c.amount > 0);
+  const top = cats.slice(0, 5);
+  const rest = cats.slice(5).reduce((t, c) => t + c.amount, 0);
+  const max = top[0]?.amount ?? 1;
+  const L = m.left.left;
+  const perDay = m.plans.at(-1)?.perDay;
+  const cat = (id: string) => categories.find((c) => c.id === id);
+
+  return (
+    <section aria-label="This month" className="rounded-2xl bg-surface p-4 shadow-sm">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold">This month</h2>
+        <span className="text-xs text-muted">{m.daysLeft <= 1 ? "salary tomorrow" : `${m.daysLeft} days to salary`}</span>
+      </div>
+      <dl className="mt-2 grid grid-cols-2 gap-2">
+        <div className="rounded-xl bg-bg p-2.5">
+          <dt className="text-xs text-muted">Spent</dt>
+          <dd className="text-lg font-semibold tabular-nums">{inr(s.total)}</dd>
+          <dd className="text-[11px] text-muted">everything you logged</dd>
+        </div>
+        <Link href="/insights" className="rounded-xl bg-bg p-2.5">
+          <dt className="text-xs text-muted">Left from salary</dt>
+          <dd className={`text-lg font-semibold tabular-nums ${L >= 0 ? "text-good" : "text-bad"}`}>{signed(L)}</dd>
+          <dd className="text-[11px] text-muted">{L >= 0 && perDay != null ? `up to ${inr(perDay)}/day` : "after bills & savings ›"}</dd>
+        </Link>
+      </dl>
+
+      <h3 className="mt-3 text-xs font-medium uppercase tracking-wide text-muted">Where it went</h3>
+      {top.length === 0 ? (
+        <p className="mt-1 text-sm text-muted">Nothing spent yet this month.</p>
+      ) : (
+        <ul className="mt-1">
+          {top.map((c) => {
+            const k = cat(c.id);
+            const list = inCycle.filter((x) => (x.category_id ?? "none") === c.id);
+            return (
+              <li key={c.id}>
+                <details className="group py-1.5">
+                  <summary className="cursor-pointer list-none text-sm">
+                    <div className="flex items-baseline gap-2">
+                      <span className="flex-1 truncate">
+                        {k?.icon ?? "•"} {k?.name ?? "Other"}
+                      </span>
+                      <span className="font-medium tabular-nums">{inr(c.amount)}</span>
+                      <span aria-hidden className="text-muted transition group-open:rotate-90">
+                        ›
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-line">
+                      <div className="h-full rounded-full bg-navy/70" style={{ width: `${(c.amount / max) * 100}%` }} />
+                    </div>
+                  </summary>
+                  <SpendList list={list} />
+                </details>
+              </li>
+            );
+          })}
+          {rest > 0 && (
+            <li className="flex justify-between py-1.5 text-sm text-muted">
+              <span>Everything else</span>
+              <span className="tabular-nums">{inr(rest)}</span>
+            </li>
+          )}
+        </ul>
+      )}
+      {s.back > 0 && <p className="mt-1 text-xs text-good">+{inr(s.back)} money back already taken off</p>}
+      <Link href="/history" className="mt-2 block text-xs font-medium text-navy">
+        All transactions ›
+      </Link>
+    </section>
   );
 }
 
@@ -307,8 +365,12 @@ export function ThisMonth() {
       ),
     },
     overspent: {
-      lines: m.left.overspent.map((f) => ({ id: f.name, label: f.name, amount: f.amount, note: "paid out more than it had", tone: "bad" as const })),
-      head: <p className="mb-1.5 text-xs text-muted">Planned and unplanned spends come out of their funds first. When a fund runs out, the rest comes out of this salary.</p>,
+      lines: m.left.overspent.map((f) => ({ id: f.name, label: f.name, amount: f.amount, note: "spent more than you'd set aside in it", tone: "bad" as const })),
+      head: (
+        <p className="mb-1.5 text-xs text-muted">
+          Planned and unplanned spends use money you set aside first. Anything spent beyond that comes out of this salary.
+        </p>
+      ),
     },
   };
 
@@ -416,7 +478,7 @@ export function CardsSection() {
       )}
       <ul className="mt-1 divide-y divide-line text-sm">
         {rows.map((r) => {
-          const level = capLevel(r.daily, r.card.monthly_cap);
+          const level = capLevel(r.total, r.card.monthly_cap);
           return (
             <li key={r.card.id} className="py-2.5">
               <div className="flex items-baseline justify-between gap-2">
@@ -429,9 +491,14 @@ export function CardsSection() {
                 {r.unplanned !== 0 ? ` · Unplanned ${money(r.unplanned)}` : ""}
               </p>
               {r.card.monthly_cap > 0 && (
-                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-line" role="img" aria-label={`${r.card.nickname}: ${inr(r.daily)} of ${inr(r.card.monthly_cap)} cap`}>
-                  <div className={`h-full rounded-full ${BAR[level]}`} style={{ width: `${Math.min(100, Math.max(0, (r.daily / r.card.monthly_cap) * 100))}%` }} />
-                </div>
+                <>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-line" role="img" aria-label={`${r.card.nickname}: ${inr(r.total)} of ${inr(r.card.monthly_cap)} cap`}>
+                    <div className={`h-full rounded-full ${BAR[level]}`} style={{ width: `${Math.min(100, Math.max(0, (r.total / r.card.monthly_cap) * 100))}%` }} />
+                  </div>
+                  <p className={`mt-0.5 text-xs ${r.total > r.card.monthly_cap ? "text-bad" : "text-muted"}`}>
+                    {r.total > r.card.monthly_cap ? `${inr(r.total - r.card.monthly_cap)} over the ${inr(r.card.monthly_cap)} monthly cap` : `of ${inr(r.card.monthly_cap)} monthly cap`}
+                  </p>
+                </>
               )}
               <button onClick={() => setMatching(r.card)} className="mt-1.5 text-xs font-medium text-navy">
                 Match with bank ›

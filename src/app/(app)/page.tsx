@@ -5,8 +5,7 @@ import { useStore } from "@/lib/store";
 import { useQuickAdd } from "@/components/quick-add";
 import { useToast } from "@/components/toast";
 import { CardStrip } from "@/components/card-strip";
-import { MonthSnapshot, UntilSalary } from "@/components/money-overview";
-import { TopTip } from "@/components/coach";
+import { MonthCard, OverLimits, TodayCard } from "@/components/money-overview";
 import { SpendRow } from "@/components/spend-row";
 import Link from "next/link";
 import { addDays, billsDueSoon, ordinal, parseYmd, salaryPromptDue, sinkingDueSoon } from "@/lib/budget";
@@ -97,7 +96,7 @@ export default function HomePage() {
         </div>
       )}
 
-      <UntilSalary />
+      <TodayCard />
 
       {dues.map((d) => (
         <p key={d.nickname} role="status" className="rounded-2xl bg-warn/15 px-4 py-3 text-sm text-warn">
@@ -111,9 +110,9 @@ export default function HomePage() {
         </Link>
       ))}
 
-      <TopTip />
+      <OverLimits />
 
-      <MonthSnapshot />
+      <MonthCard />
 
       <CardStrip />
 
