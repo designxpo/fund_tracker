@@ -10,7 +10,7 @@ const TABS = [
   { href: "/insights", label: "Insights", Icon: ChartIcon, also: [] },
   { href: "/history", label: "History", Icon: HistoryIcon, also: [] },
   { href: "/salary", label: "Salary", Icon: WalletIcon, also: [] },
-  { href: "/more", label: "More", Icon: MoreIcon, also: ["/goals"] },
+  { href: "/more", label: "More", Icon: MoreIcon, also: ["/goals", "/budget"] },
 ];
 
 /** Floating glass capsule tab bar; content scrolls underneath it. */

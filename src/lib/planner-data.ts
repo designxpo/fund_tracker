@@ -33,7 +33,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
     sb.from("loan").select("*").limit(1).then(ok),
     sb.from("income").select("*").order("received_on", { ascending: false }).limit(200).then(ok),
     sb.from("settings").select("income_split").maybeSingle().then(ok),
-    sb.from("plan_months").select("month, daily_budget").then((r: { data: unknown[] | null }) => r.data ?? []), // optional: none before the migration
+    sb.from("plan_months").select("month, daily_budget, salary").then(ok),
   ]);
 
   const txSum = new Map<string, number>();
@@ -108,7 +108,7 @@ export async function loadPlanner(sb: SupabaseClient, cycle: Cycle, today: strin
     cycleStart: cycle.starts_on,
     salary: Number(cycle.salary),
     dailyBudget: Number(cycle.daily_budget),
-    dailyBudgets: (monthRows as { month: string; daily_budget: number }[]).map((r) => ({ month: String(r.month).slice(0, 7), daily: Number(r.daily_budget) })),
+    dailyBudgets: (monthRows as { month: string; daily_budget: number; salary: number | null }[]).map((r) => ({ month: String(r.month).slice(0, 7), daily: Number(r.daily_budget), salary: r.salary == null ? null : Number(r.salary) })),
     extraMonthly,
     lines,
     templates,

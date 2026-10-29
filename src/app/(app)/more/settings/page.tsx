@@ -204,6 +204,8 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-bold">Settings</h1>
       </div>
 
+      <Link href="/budget" className="flex items-center justify-between rounded-2xl bg-navy p-4 text-sm font-semibold text-white"><span>Open Budget & spending caps<span className="mt-1 block text-xs font-normal text-white/80">Plan each month with explicit Save and a salary check.</span></span><span aria-hidden>→</span></Link>
+
       <Section title="Budget" hint="Applies to the current salary cycle.">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Monthly take-home (₹)" numeric value={cycle.salary} onCommit={(v) => save(() => sb.from("cycles").update({ salary: Number(v) }).eq("id", cycle.id))} />
@@ -394,6 +396,7 @@ export default function SettingsPage() {
         </div>
       </Section>
 
+      <div id="sinking-funds" className="scroll-mt-5" />
       {goals.some((g) => g.kind === "sinking") && (
         <Section title="Sinking funds" hint="Saved monthly for a bulk buy every few months. Logging a Planned spend moves the due date forward.">
           {goals

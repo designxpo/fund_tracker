@@ -12,6 +12,12 @@ and plan goals. Next.js (App Router) + Tailwind + Supabase (Postgres, RLS, Auth)
 5. `npm run dev`. Defaults are seeded on first login.
 
 ## Architecture
+- **Budget & caps** (`/budget`, also linked from Home and More): select a month, edit expected salary,
+  daily allowance, plan allocations, category caps and recurring card caps, then Save. Category caps
+  apply to that calendar month only and net refunds across all spend types. Card caps remain recurring
+  defaults. `save_budget` saves the complete edit in one transaction without changing paid actuals.
+  Future salary/daily settings carry forward; salary day confirms the actual salary. Requires migration
+  `20261029090000_budget_controls.sql`.
 - **Spends** go through an offline-first store (`src/lib/store.tsx`): saved locally with a client UUID,
   queued, and upserted on reconnect (no duplicates). Rejected changes are kept for Retry/Discard.
 - **Everything else** (plans, goals, loan, income, planner) is read through one shared, persisted

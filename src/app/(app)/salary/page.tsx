@@ -28,10 +28,11 @@ export default function SalaryPage() {
   // Only what the store doesn't already have: last cycle's spends (for card bills), extra income, the loan.
   const { data } = useData("salary-extra", async () => {
     if (!cycle) return null;
-    const [prev, income, loan] = await Promise.all([
+    const [prev, income, loan, budgets] = await Promise.all([
       sb.from("cycles").select("starts_on, ends_on").eq("ends_on", addDays(cycle.starts_on, -1)).limit(1).then(ok),
       sb.from("income").select("amount").gte("received_on", cycle.starts_on).lte("received_on", cycleEnd(cycle.starts_on, cycle.ends_on)).then(ok),
       sb.from("loan").select("name").limit(1).then(ok),
+      sb.from("plan_months").select("month,salary").not("salary", "is", null).order("month").then(ok),
     ]);
     const p = (prev as { starts_on: string; ends_on: string }[])[0];
     const prevSpends = p
@@ -44,6 +45,7 @@ export default function SalaryPage() {
       prevSpends: prevSpends.map((s) => ({ ...s, amount: Number(s.amount) })),
       extraIncome: (income as { amount: number }[]).reduce((t, i) => t + Number(i.amount), 0),
       loanName: ((loan as { name: string }[])[0]?.name as string | undefined) ?? null,
+      budgets: budgets as { month: string; salary: number }[],
     };
   }, cycle?.id);
 
@@ -51,6 +53,7 @@ export default function SalaryPage() {
 
   const days = diffDays(cycle.starts_on, cycleEnd(cycle.starts_on, cycle.ends_on)) + 1;
   const salary = Number(cycle.salary);
+  const expectedSalary = (data.budgets ?? []).filter(b => b.month.slice(0, 7) > cycle.starts_on.slice(0, 7) && b.month.slice(0, 7) <= newDate.slice(0, 7)).at(-1)?.salary ?? salary;
   const month = monthSummary(salary, Number(cycle.daily_budget) * days, planItems, settlements);
   const bill = settlements.find((s) => s.kind === "card_bills");
   const dailyResults = settlements.filter((s) => s.kind === "daily_result");
@@ -93,7 +96,8 @@ export default function SalaryPage() {
     setBusy(true);
     setErr(null);
     try {
-      await rpc("start_cycle", { p_starts_on: newDate, p_salary: Number(newSalary || salary) });
+      const expected = (data!.budgets ?? []).filter(b => b.month.slice(0, 7) > cycle!.starts_on.slice(0, 7) && b.month.slice(0, 7) <= newDate.slice(0, 7)).at(-1)?.salary ?? salary;
+      await rpc("start_cycle", { p_starts_on: newDate, p_salary: Number(newSalary || expected) });
       setRolling(false);
       await reload();
       toast({ msg: "New cycle started. Work through the checklist." });
@@ -117,7 +121,7 @@ export default function SalaryPage() {
         <button
           onClick={() => {
             setRolling((v) => !v);
-            setNewSalary(String(salary));
+            setNewSalary("");
           }}
           className="h-11 shrink-0 rounded-xl bg-mint px-4 text-sm font-semibold text-navy"
         >
@@ -141,6 +145,7 @@ export default function SalaryPage() {
               <input
                 inputMode="decimal"
                 value={newSalary}
+                placeholder={String(expectedSalary)}
                 onChange={(e) => setNewSalary(e.target.value.replace(/[^\d.]/g, ""))}
                 className="mt-1 h-11 w-full rounded-xl border border-line bg-bg px-3 text-base text-ink"
               />

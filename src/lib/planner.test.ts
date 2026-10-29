@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { simulate, freeMoney, emiFor, recurringExtra, addMonths, dailyFor, type PlannerInputs } from "./planner.ts";
+import { simulate, freeMoney, emiFor, recurringExtra, addMonths, dailyFor, salaryFor, type PlannerInputs } from "./planner.ts";
 
 // Example persona: commitments 42,000 + ₹500/day on a 58,000 salary leaves ~₹792 free.
 const lines = [
@@ -47,6 +47,14 @@ test("month daily budgets apply from their month onward, after the current cycle
 test("bills/unspent lines are not commitments", () => {
   const f = freeMoney("2026-11", { ...base, lines: lines.filter((l) => l.kind !== "bills") });
   assert.equal(f, freeMoney("2026-11", base));
+});
+
+test("scheduled salary is used in projections and survives a later daily-only budget", () => {
+  const inp = { ...base, dailyBudgets: [{ month: "2026-10", daily: 500, salary: 1 }, { month: "2026-11", daily: 500, salary: 62000 }, { month: "2026-12", daily: 450, salary: null }] };
+  assert.equal(salaryFor("2026-10", inp), base.salary);
+  assert.equal(salaryFor("2026-11", inp), 62000);
+  assert.equal(salaryFor("2026-12", inp), 62000);
+  assert.equal(freeMoney("2026-11", inp) - freeMoney("2026-11", base), 4000);
 });
 
 test("goal waits for free money, then fills in priority order", () => {

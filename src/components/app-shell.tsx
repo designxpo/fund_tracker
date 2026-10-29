@@ -7,9 +7,12 @@ import { QuickAddProvider, useQuickAdd } from "@/components/quick-add";
 import { BottomNav } from "@/components/bottom-nav";
 import { PlusIcon } from "@/components/icons";
 import { ErrorReporter } from "@/components/error-reporter";
+import { usePathname } from "next/navigation";
 
 function Fab() {
   const { open } = useQuickAdd();
+  const path = usePathname();
+  if (path === "/budget") return null;
   return (
     <button
       aria-label="Add spend"

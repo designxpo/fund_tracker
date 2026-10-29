@@ -10,7 +10,7 @@ export type PlanLine = { name: string; kind: string; planned: number; goal_id: s
 /** A month's plan; applies from `month` until a later template takes over. */
 export type PlanTemplate = { month: YM; lines: PlanLine[] };
 /** A month's daily budget; applies from `month` until a later one takes over. */
-export type MonthBudget = { month: YM; daily: number };
+export type MonthBudget = { month: YM; daily: number; salary?: number | null };
 
 export type PlannerInputs = {
   start: YM;                    // first month to project (the next salary)
@@ -67,6 +67,12 @@ export function dailyFor(ym: YM, inp: Pick<PlannerInputs, "cycleStart" | "dailyB
   return b ? b.daily : inp.dailyBudget;
 }
 
+export function salaryFor(ym: YM, inp: Pick<PlannerInputs, "cycleStart" | "salary" | "dailyBudgets">): number {
+  const row = (inp.dailyBudgets ?? []).filter(b => b.month > inp.cycleStart.slice(0, 7) && b.month <= ym && b.salary != null)
+    .sort((a, b) => b.month.localeCompare(a.month))[0];
+  return row?.salary ?? inp.salary;
+}
+
 export function lineAmount(line: PlanLine, ym: YM, inp: PlannerInputs): number {
   if (inp.loanFreeFrom && inp.loanLines.includes(line.name) && ym >= inp.loanFreeFrom) return 0;
   return line.planned;
@@ -79,7 +85,7 @@ export function commitments(ym: YM, inp: PlannerInputs) {
 }
 
 export function freeMoney(ym: YM, inp: PlannerInputs) {
-  return inp.salary + inp.extraMonthly - dailyFor(ym, inp) * DAYS_PER_MONTH - commitments(ym, inp);
+  return salaryFor(ym, inp) + inp.extraMonthly - dailyFor(ym, inp) * DAYS_PER_MONTH - commitments(ym, inp);
 }
 
 export function simulate(inp: PlannerInputs, goals: PlannerGoal[]): Record<string, GoalResult> {

@@ -5,6 +5,7 @@ import { useStore } from "@/lib/store";
 import { useQuickAdd } from "@/components/quick-add";
 import { useToast } from "@/components/toast";
 import { CardStrip } from "@/components/card-strip";
+import { BudgetCaps } from "@/components/budget-caps";
 import { MonthCard, OverLimits, TodayCard } from "@/components/money-overview";
 import { SpendRow } from "@/components/spend-row";
 import Link from "next/link";
@@ -97,6 +98,7 @@ export default function HomePage() {
       )}
 
       <TodayCard />
+      <BudgetCaps />
 
       {dues.map((d) => (
         <p key={d.nickname} role="status" className="rounded-2xl bg-warn/15 px-4 py-3 text-sm text-warn">
