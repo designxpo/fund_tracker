@@ -12,6 +12,7 @@ import { inr } from "@/lib/money";
 import { monthSummary } from "@/lib/month";
 import { STEP_TITLES, stepOf } from "@/lib/plan";
 import { MonthCard } from "@/components/salary/month-card";
+import { SkipSavings } from "@/components/salary/skip-savings";
 import { CardBillStep } from "@/components/salary/card-bill-step";
 import { DailyResultRow, MoveRow, PlanRow } from "@/components/salary/rows";
 
@@ -167,6 +168,8 @@ export default function SalaryPage() {
         loanName={data.loanName}
         onSettle={settleMonth}
       />
+
+      <SkipSavings act={act} />
 
       {data.extraIncome > 0 && (
         <Link href="/more/income" className="flex items-center justify-between rounded-2xl bg-surface p-4 text-sm">

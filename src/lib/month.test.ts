@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { categoryChange, moneyLeft, overLimits, monthSpending, monthSummary, pacePlans, planVsActual, salaryUtilisation, type MonthItem } from "./month.ts";
+import { categoryChange, moneyLeft, overLimits, skippableSavings, monthSpending, monthSummary, pacePlans, planVsActual, salaryUtilisation, type MonthItem } from "./month.ts";
 
 // Example persona's checklist (amounts are what was entered on Salary Day).
 const items: MonthItem[] = [
@@ -174,4 +174,20 @@ test("over the limit: funds, card caps, everyday budget and bills, biggest first
 
 test("nothing over: no items", () => {
   assert.deepEqual(overLimits({ funds: [], fundSpent: {}, cards: [], cardSpent: {}, daily: { spent: 10, budgetToDate: 100 }, bills: [] }), []);
+});
+
+test("skipping savings this month: done at ₹0 against the plan", () => {
+  const lines = [
+    { id: "1", name: "Mutual fund SIP", kind: "savings", planned: 4000, actual: 0, done: true, goal_id: "lt" },
+    { id: "2", name: "Gold", kind: "savings", planned: 1500, actual: null, done: false, goal_id: "lt" },
+    { id: "3", name: "Emergency fund", kind: "savings", planned: 7000, actual: 7000, done: true, goal_id: "em" },
+    { id: "4", name: "Loan EMI", kind: "loan", planned: 12000, actual: 0, done: true, goal_id: null },
+    { id: "5", name: "Trip fund", kind: "savings", planned: 0, actual: 0, done: true, goal_id: "trip" },
+  ];
+  const s = skippableSavings(lines);
+  assert.deepEqual(s.lines.map((l) => l.name), ["Mutual fund SIP", "Gold", "Emergency fund"]); // no EMIs, no ₹0 lines
+  assert.equal(s.skippedTotal, 4000);
+  // skipping frees the money: what's left of the salary goes up by the skipped amount
+  const before = moneyLeft(55000, lines.map((l) => (l.id === "1" ? { ...l, actual: 4000 } : l)), [], [], 0).left;
+  assert.equal(moneyLeft(55000, lines, [], [], 0).left - before, 4000);
 });

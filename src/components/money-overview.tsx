@@ -173,6 +173,7 @@ export function MonthCard() {
   const max = top[0]?.amount ?? 1;
   const L = m.left.left;
   const perDay = m.plans.at(-1)?.perDay;
+  const short = L < m.dailyStillNeeded; // not enough left for the daily budget until salary day
   const cat = (id: string) => categories.find((c) => c.id === id);
 
   return (
@@ -187,10 +188,12 @@ export function MonthCard() {
           <dd className="text-lg font-semibold tabular-nums">{inr(s.total)}</dd>
           <dd className="text-[11px] text-muted">everything you logged</dd>
         </div>
-        <Link href="/insights" className="rounded-xl bg-bg p-2.5">
+        <Link href={short ? "/salary#skip" : "/insights"} className="rounded-xl bg-bg p-2.5">
           <dt className="text-xs text-muted">Left from salary</dt>
           <dd className={`text-lg font-semibold tabular-nums ${L >= 0 ? "text-good" : "text-bad"}`}>{signed(L)}</dd>
-          <dd className="text-[11px] text-muted">{L >= 0 && perDay != null ? `up to ${inr(perDay)}/day` : "after bills & savings ›"}</dd>
+          <dd className={`text-[11px] ${short ? "font-medium text-navy" : "text-muted"}`}>
+            {short ? "not enough for daily spending: skip savings ›" : perDay != null ? `up to ${inr(perDay)}/day` : "after bills & savings ›"}
+          </dd>
         </Link>
       </dl>
 

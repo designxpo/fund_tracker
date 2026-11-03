@@ -26,7 +26,10 @@ export function PlanRow({
       />
       <span className={`min-w-0 flex-1 text-sm ${item.done ? "text-muted line-through" : ""}`}>
         {item.name}
-        <span className="block text-xs text-muted">planned {inr(item.planned)}</span>
+        <span className="block text-xs text-muted">
+          planned {inr(item.planned)}
+          {item.done && item.actual === 0 && item.planned > 0 ? " · skipped this month" : ""}
+        </span>
       </span>
       <span className="text-muted">₹</span>
       <input

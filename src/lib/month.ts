@@ -231,3 +231,13 @@ export function overLimits(i: {
     if (b.actual - b.planned >= 1) out.push({ key: `bill-${b.name}`, kind: "bill", ref: null, title: b.name, spent: b.actual, limit: b.planned, over: b.actual - b.planned });
   return out.sort((a, b) => b.over - a.over);
 }
+
+type PlanLine = MonthItem & { id: string; done: boolean };
+/** A line done at ₹0 against a planned amount: skipped this month (no money moved). */
+export const isSkipped = (i: { done: boolean; actual: number | null; planned: number }) => i.done && i.actual != null && Number(i.actual) === 0 && Number(i.planned) > 0;
+
+/** Savings, buffer and loan-prepayment lines that can be skipped this month, and how much is skipped. */
+export function skippableSavings<T extends PlanLine>(items: T[]) {
+  const lines = items.filter((i) => ["savings", "buffer", "prepayment"].includes(i.kind) && Number(i.planned) > 0);
+  return { lines, skippedTotal: lines.filter(isSkipped).reduce((t, i) => t + Number(i.planned), 0) };
+}

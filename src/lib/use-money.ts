@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store";
 import { ok, useData } from "@/lib/use-data";
 import { addDays, diffDays, salaryPromptDue } from "@/lib/budget";
-import { moneyLeft, monthSummary, overLimits, pacePlans, planVsActual, salaryUtilisation, type MonthItem, type MonthSettlement } from "@/lib/month";
+import { bucketOf, isSkipped, moneyLeft, monthSummary, overLimits, pacePlans, planVsActual, salaryUtilisation, type MonthItem, type MonthSettlement } from "@/lib/month";
 import { coachNudges, savingsTarget } from "@/lib/coach";
 import type { FundSettle, SpendType } from "@/lib/types";
 
@@ -132,7 +132,9 @@ export function useMoney() {
 
   const pastRates = past.slice(-5).map((c) => (c.salary > 0 ? salaryUtilisation(c.salary, 0, 0, c.items, c.settlements, goals).saved / c.salary : 0));
   const savedRow = variance.find((r) => r.key === "saved");
-  const savedPlan = savedRow?.plan ?? 0;
+  // A line skipped on purpose this month isn't "saving less than planned".
+  const skipped = planItems.filter((i) => isSkipped(i) && i.kind === "savings" && bucketOf(i, goals) === "saved").reduce((t, i) => t + Number(i.planned), 0);
+  const savedPlan = (savedRow?.plan ?? 0) - skipped;
   const target = savingsTarget(pastRates, salary > 0 ? savedPlan / salary : 0);
   // Savings net of any shortfall: if this salary ran short, the gap comes out of what was saved.
   const saved = left.rows.find((r) => r.key === "saved")!.amount;
@@ -198,6 +200,8 @@ export function useMoney() {
     /** limits gone over this month, biggest first */
     over,
     budgetToDate: dailyBudget * elapsed,
+    /** what the daily budget still needs until salary day */
+    dailyStillNeeded: Math.max(0, summary.cycle.left),
     /** saved & invested from this salary, and the same net of any shortfall */
     saved,
     netSaved,
