@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store";
 import { ok, useData } from "@/lib/use-data";
 import { addDays, diffDays, salaryPromptDue } from "@/lib/budget";
-import { bucketOf, isSkipped, moneyLeft, monthSummary, overLimits, pacePlans, planVsActual, salaryUtilisation, type MonthItem, type MonthSettlement } from "@/lib/month";
+import { bucketOf, carriedOverdue, isSkipped, moneyLeft, monthSummary, overLimits, pacePlans, planVsActual, salaryUtilisation, type MonthItem, type MonthSettlement } from "@/lib/month";
 import { coachNudges, savingsTarget } from "@/lib/coach";
 import type { FundSettle, SpendType } from "@/lib/types";
 
@@ -27,7 +27,7 @@ export type PastCycle = {
   salary: number;
   daily_budget: number;
   items: MonthItem[];
-  settlements: MonthSettlement[];
+  settlements: (MonthSettlement & { done: boolean })[];
   spends: HistSpend[];
 };
 /** Closed cycles, oldest first, and every credit card ever used (inactive ones too). */
@@ -45,7 +45,7 @@ async function fetchHistory(): Promise<MoneyHistory> {
   const ids = list.map((c) => c.id);
   const [items, sets, ...spends] = await Promise.all([
     sb.from("plan_items").select("cycle_id, name, kind, goal_id, planned, actual").in("cycle_id", ids).then(ok),
-    sb.from("cycle_settlements").select("cycle_id, kind, goal_id, amount").in("cycle_id", ids).then(ok),
+    sb.from("cycle_settlements").select("cycle_id, kind, goal_id, amount, done").in("cycle_id", ids).then(ok),
     ...list.map((c) =>
       sb
         .from("spends")
@@ -57,7 +57,7 @@ async function fetchHistory(): Promise<MoneyHistory> {
         .then(ok),
     ),
   ]);
-  type R = { cycle_id: string; kind: string; goal_id: string | null; name: string; planned: unknown; actual: unknown; amount: unknown };
+  type R = { cycle_id: string; kind: string; goal_id: string | null; name: string; planned: unknown; actual: unknown; amount: unknown; done: boolean };
   return {
     creditIds,
     cycles: list
@@ -70,7 +70,7 @@ async function fetchHistory(): Promise<MoneyHistory> {
         items: (items as R[])
           .filter((r) => r.cycle_id === c.id)
           .map((r): MonthItem => ({ ...r, planned: Number(r.planned), actual: r.actual == null ? null : Number(r.actual) })),
-        settlements: (sets as R[]).filter((r) => r.cycle_id === c.id).map((r): MonthSettlement => ({ ...r, amount: Number(r.amount) })),
+        settlements: (sets as R[]).filter((r) => r.cycle_id === c.id).map((r) => ({ ...r, amount: Number(r.amount), done: r.done === true })),
         spends: (spends[i] as HistSpend[]).map((s) => ({ ...s, amount: Number(s.amount) })),
       }))
       .reverse(),
@@ -78,7 +78,7 @@ async function fetchHistory(): Promise<MoneyHistory> {
 }
 
 export function useMoneyHistory(cycleId: string | undefined) {
-  return useData("money-history-v3", fetchHistory, cycleId);
+  return useData("money-history-v4", fetchHistory, cycleId);
 }
 
 type SpendLike = { amount: number; card_id: string | null; spend_type?: string };
@@ -107,7 +107,14 @@ export function useMoney() {
   const inCycle = spends.filter((s) => s.spent_on >= start && s.spent_on <= end);
   const variance = planVsActual(planItems, settlements, goals, { budgetToDate: dailyBudget * elapsed, spent: summary.cycle.spent });
   const month = monthSummary(salary, dailyBudget * days, planItems, settlements);
-  const left = moneyLeft(salary, planItems, settlements, goals, summary.cycle.spent);
+  // Last month's overdue, carried forward through the run of back-to-back months ending last month.
+  const chain: PastCycle[] = [];
+  for (let i = past.length - 1, next = start; i >= 0 && past[i].ends_on === addDays(next, -1); next = past[i].starts_on, i--) chain.unshift(past[i]);
+  const carried = carriedOverdue(
+    chain.map((c) => ({ salary: c.salary, dailyReserve: c.daily_budget * (diffDays(c.starts_on, c.ends_on) + 1), items: c.items, settlements: c.settlements })),
+    settlements,
+  );
+  const left = moneyLeft(salary, planItems, settlements, goals, summary.cycle.spent, carried.total);
   // Today's spending for the daily share: money back today adds to what's left instead.
   const todayGross = inCycle.filter((s) => s.spent_on === today && isDailyType(s) && s.amount > 0).reduce((t, s) => t + Number(s.amount), 0);
   const plans = pacePlans(left.left, todayGross, summary.cycle.daysLeft);
@@ -128,6 +135,7 @@ export function useMoney() {
     bills: planItems
       .filter((i) => (i.kind === "loan" || i.kind === "fixed") && i.actual != null)
       .map((i) => ({ name: i.name, planned: Number(i.planned), actual: Number(i.actual) })),
+    carried: carried.total,
   });
 
   const pastRates = past.slice(-5).map((c) => (c.salary > 0 ? salaryUtilisation(c.salary, 0, 0, c.items, c.settlements, goals).saved / c.salary : 0));
@@ -200,6 +208,8 @@ export function useMoney() {
     /** limits gone over this month, biggest first */
     over,
     budgetToDate: dailyBudget * elapsed,
+    /** last month's overdue carried into this salary (plan shortfall + unsettled daily overspend) */
+    carried,
     /** what the daily budget still needs until salary day */
     dailyStillNeeded: Math.max(0, summary.cycle.left),
     /** saved & invested from this salary, and the same net of any shortfall */

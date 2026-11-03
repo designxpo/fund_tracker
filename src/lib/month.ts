@@ -128,18 +128,19 @@ export function planVsActual(
 }
 
 export type FundState = GoalKindRef & { name: string; available: number; locked?: boolean };
-export type LeftRow = { key: "bills" | "saved" | "setAside" | "spent" | "overspent"; label: string; amount: number };
+export type LeftRow = { key: "carried" | "bills" | "saved" | "setAside" | "spent" | "overspent"; label: string; amount: number };
 
 /**
  * What's left of this salary until salary day:
  * salary − bills & EMIs − saved & invested − set aside in funds − daily spending − what funds couldn't cover.
  * Planned/unplanned spends come out of their funds first; only a fund in the red counts against the salary.
  */
-export function moneyLeft(salary: number, items: MonthItem[], settlements: MonthSettlement[], funds: FundState[], dailySpent: number) {
+export function moneyLeft(salary: number, items: MonthItem[], settlements: MonthSettlement[], funds: FundState[], dailySpent: number, carried = 0) {
   const u = salaryUtilisation(salary, 0, dailySpent, items, settlements, funds);
   const by = (k: UtilRow["key"]) => u.rows.find((r) => r.key === k)!.amount;
   const overspent = funds.filter((f) => !f.locked && f.available < -0.5).map((f) => ({ name: f.name, amount: -f.available }));
   const rows: LeftRow[] = [
+    { key: "carried", label: "Overdue from last month", amount: carried },
     { key: "bills", label: "Bills & EMIs", amount: by("emis") + by("fixed") },
     { key: "saved", label: "Saved & invested", amount: u.saved },
     { key: "setAside", label: "Set aside in funds", amount: u.setAside },
@@ -190,7 +191,7 @@ export function categoryChange(now: SpendLite[], before: SpendLite[] | null) {
 
 export type OverItem = {
   key: string;
-  kind: "fund" | "card" | "daily" | "bill";
+  kind: "carried" | "fund" | "card" | "daily" | "bill";
   /** goal id (fund) or card id (card) the spends behind it can be found by */
   ref: string | null;
   title: string;
@@ -211,8 +212,11 @@ export function overLimits(i: {
   cardSpent: Record<string, number>;
   daily: { spent: number; budgetToDate: number };
   bills: { name: string; planned: number; actual: number }[];
+  /** last month's overdue carried into this salary */
+  carried?: number;
 }): OverItem[] {
   const out: OverItem[] = [];
+  if ((i.carried ?? 0) >= 1) out.push({ key: "carried", kind: "carried", ref: null, title: "Overdue from last month", spent: i.carried!, limit: 0, over: i.carried! });
   for (const f of i.funds) {
     if (f.locked || f.available >= -0.5) continue;
     const spent = i.fundSpent[f.id] ?? 0;
@@ -240,4 +244,27 @@ export const isSkipped = (i: { done: boolean; actual: number | null; planned: nu
 export function skippableSavings<T extends PlanLine>(items: T[]) {
   const lines = items.filter((i) => ["savings", "buffer", "prepayment"].includes(i.kind) && Number(i.planned) > 0);
   return { lines, skippedTotal: lines.filter(isSkipped).reduce((t, i) => t + Number(i.planned), 0) };
+}
+
+type SettlementWithDone = MonthSettlement & { done?: boolean };
+
+/**
+ * Last month's overdue, carried into this salary until it's covered. Month by month (oldest first): what a
+ * month came up short (salary − plan − daily budget, after any leftover moved or money borrowed), plus a
+ * daily-budget overspend nobody has settled yet, rolls into the next month; a month with money to spare
+ * absorbs it. The current month adds its own unsettled "daily budget overspent" line from last month.
+ */
+export function carriedOverdue(
+  past: { salary: number; dailyReserve: number; items: MonthItem[]; settlements: SettlementWithDone[] }[],
+  current: SettlementWithDone[],
+) {
+  const dailyOver = (ss: SettlementWithDone[]) =>
+    ss.filter((x) => x.kind === "daily_result" && Number(x.amount) < 0 && !x.done).reduce((t, x) => t - Number(x.amount), 0);
+  let carry = 0;
+  for (const c of past) {
+    const net = monthSummary(c.salary, c.dailyReserve, c.items, c.settlements).result - carry - dailyOver(c.settlements);
+    carry = Math.max(0, -net);
+  }
+  const dailyOverspend = dailyOver(current);
+  return { fromBefore: carry, dailyOverspend, total: carry + dailyOverspend };
 }

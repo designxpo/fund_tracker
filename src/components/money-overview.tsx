@@ -13,8 +13,9 @@ import { CardMatch } from "@/components/card-match";
 import { useQuickAdd } from "@/components/quick-add";
 import { isDaily, type Card, type Spend } from "@/lib/types";
 
-/** One colour per part of the salary, the same everywhere (validated order: blue, aqua, yellow, violet, red). */
+/** One colour per part of the salary, the same everywhere (validated order: magenta, blue, aqua, yellow, violet, red). */
 export const LEFT_COLORS: Record<LeftRow["key"], string> = {
+  carried: "#e87ba4",
   bills: "#2a78d6",
   saved: "#1baf7a",
   setAside: "#eda100",
@@ -93,7 +94,7 @@ function SpendList({ list }: { list: Spend[] }) {
   );
 }
 
-const LIMIT_LABEL = { fund: "set aside", card: "monthly cap", daily: "budget so far", bill: "planned" } as const;
+const LIMIT_LABEL = { carried: "", fund: "set aside", card: "monthly cap", daily: "budget so far", bill: "planned" } as const;
 
 /** Home: every limit this month went over, in plain words, each opening to the spends behind it. */
 export function OverLimits() {
@@ -129,7 +130,7 @@ export function OverLimits() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium">{o.title}</span>
                     <span className="block text-xs text-muted">
-                      {inr(o.spent)} spent · {inr(o.limit)} {LIMIT_LABEL[o.kind]}
+                      {o.kind === "carried" ? "carried into this salary" : `${inr(o.spent)} spent · ${inr(o.limit)} ${LIMIT_LABEL[o.kind]}`}
                     </span>
                   </span>
                   <span className="shrink-0 text-sm font-semibold tabular-nums text-bad">{inr(o.over)} over</span>
@@ -144,6 +145,14 @@ export function OverLimits() {
                   </p>
                 )}
                 {o.kind === "card" && <p className="mt-1 text-xs text-muted">Everything you put on this card this month.</p>}
+                {o.kind === "carried" && (
+                  <p className="mt-1 text-xs text-muted">
+                    Last month went over and it wasn&apos;t covered, so it comes out of this salary.{" "}
+                    <Link href="/salary#skip" className="font-medium text-navy">
+                      Cover it on the Salary page ›
+                    </Link>
+                  </p>
+                )}
                 {o.kind === "bill" && <p className="mt-1 text-xs text-muted">This bill cost more than planned on Salary Day.</p>}
                 {list.length > 0 && <SpendList list={list} />}
               </details>
@@ -190,7 +199,7 @@ export function MonthCard() {
         </div>
         <Link href={short ? "/salary#skip" : "/insights"} className="rounded-xl bg-bg p-2.5">
           <dt className="text-xs text-muted">Left from salary</dt>
-          <dd className={`text-lg font-semibold tabular-nums ${L >= 0 ? "text-good" : "text-bad"}`}>{signed(L)}</dd>
+          <dd className={`text-lg font-semibold tabular-nums ${L < 0 ? "text-bad" : short ? "text-warn" : "text-good"}`}>{signed(L)}</dd>
           <dd className={`text-[11px] ${short ? "font-medium text-navy" : "text-muted"}`}>
             {short ? "not enough for daily spending: skip savings ›" : perDay != null ? `up to ${inr(perDay)}/day` : "after bills & savings ›"}
           </dd>
@@ -346,6 +355,15 @@ export function ThisMonth() {
   });
 
   const details: Record<LeftRow["key"], { lines: Line[]; head?: React.ReactNode }> = {
+    carried: {
+      lines: [
+        ...(m.carried.fromBefore >= 1 ? [{ id: "before", label: "Last month came up short", amount: m.carried.fromBefore, note: "plan + daily budget cost more than the salary" }] : []),
+        ...(m.carried.dailyOverspend >= 1
+          ? [{ id: "daily", label: "Last month's daily overspend", amount: m.carried.dailyOverspend, note: "not settled yet: Salary → step 10" }]
+          : []),
+      ],
+      head: <p className="mb-1.5 text-xs text-muted">What last month went over and nobody covered yet. It comes off this salary first.</p>,
+    },
     bills: { lines: planLines(["emis", "fixed"]) },
     saved: {
       lines: planLines(["saved"]),
@@ -395,7 +413,7 @@ export function ThisMonth() {
 
       <ul className="mt-1 divide-y divide-line">
         {m.left.rows
-          .filter((r) => r.key !== "overspent" || r.amount > 0)
+          .filter((r) => (r.key !== "overspent" && r.key !== "carried") || r.amount > 0)
           .map((r) => (
             <li key={r.key}>
               <details className="group py-2.5">

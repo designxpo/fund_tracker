@@ -13,6 +13,7 @@ import { monthSummary } from "@/lib/month";
 import { STEP_TITLES, stepOf } from "@/lib/plan";
 import { MonthCard } from "@/components/salary/month-card";
 import { SkipSavings } from "@/components/salary/skip-savings";
+import { useMoney } from "@/lib/use-money";
 import { CardBillStep } from "@/components/salary/card-bill-step";
 import { DailyResultRow, MoveRow, PlanRow } from "@/components/salary/rows";
 
@@ -25,6 +26,7 @@ export default function SalaryPage() {
   const [newSalary, setNewSalary] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const money = useMoney();
 
   // Only what the store doesn't already have: last cycle's spends (for card bills), extra income, the loan.
   const { data } = useData("salary-extra", async () => {
@@ -56,6 +58,13 @@ export default function SalaryPage() {
   const salary = Number(cycle.salary);
   const expectedSalary = (data.budgets ?? []).filter(b => b.month.slice(0, 7) > cycle.starts_on.slice(0, 7) && b.month.slice(0, 7) <= newDate.slice(0, 7)).at(-1)?.salary ?? salary;
   const month = monthSummary(salary, Number(cycle.daily_budget) * days, planItems, settlements);
+  // What last month left owing comes off this month's leftover before anything is moved to savings.
+  const owed = {
+    fromBefore: money?.carried.fromBefore ?? 0,
+    dailyOverspend: money?.carried.dailyOverspend ?? 0,
+    fundsOver: money?.left.rows.find((r) => r.key === "overspent")?.amount ?? 0,
+  };
+  const free = month.result - owed.fromBefore - owed.fundsOver;
   const bill = settlements.find((s) => s.kind === "card_bills");
   const dailyResults = settlements.filter((s) => s.kind === "daily_result");
   const moves = settlements.filter((s) => s.kind === "leftover" || s.kind === "borrow");
@@ -80,7 +89,7 @@ export default function SalaryPage() {
   }
 
   async function settleMonth(target: string) {
-    const amount = Math.round(month.result * 100) / 100;
+    const amount = Math.round(free * 100) / 100;
     const goal = goals.find((g) => g.id === target);
     if (amount < 0 && goal?.role === "emergency" && !confirm(`Borrow ${inr(-amount)} from your Emergency fund?`)) return;
     await act(
@@ -166,6 +175,7 @@ export default function SalaryPage() {
         days={days}
         goals={goals}
         loanName={data.loanName}
+        owed={owed}
         onSettle={settleMonth}
       />
 

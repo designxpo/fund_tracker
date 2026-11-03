@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { categoryChange, moneyLeft, overLimits, skippableSavings, monthSpending, monthSummary, pacePlans, planVsActual, salaryUtilisation, type MonthItem } from "./month.ts";
+import { carriedOverdue, categoryChange, moneyLeft, overLimits, skippableSavings, monthSpending, monthSummary, pacePlans, planVsActual, salaryUtilisation, type MonthItem } from "./month.ts";
 
 // Example persona's checklist (amounts are what was entered on Salary Day).
 const items: MonthItem[] = [
@@ -190,4 +190,22 @@ test("skipping savings this month: done at ₹0 against the plan", () => {
   // skipping frees the money: what's left of the salary goes up by the skipped amount
   const before = moneyLeft(55000, lines.map((l) => (l.id === "1" ? { ...l, actual: 4000 } : l)), [], [], 0).left;
   assert.equal(moneyLeft(55000, lines, [], [], 0).left - before, 4000);
+});
+
+test("last month's overdue carries into this salary until it's covered", () => {
+  const month = (salary: number, plan: number, settlements: { kind: string; amount: number; goal_id: null; done?: boolean }[] = []) => ({
+    salary,
+    dailyReserve: 10000,
+    items: [{ name: "Plan", kind: "fixed", planned: plan, actual: null, goal_id: null }],
+    settlements,
+  });
+  // September came up ₹3,000 short; October had ₹1,000 spare: ₹2,000 still owed
+  assert.equal(carriedOverdue([month(50000, 43000), month(50000, 39000)], []).fromBefore, 2000);
+  // a settled (borrowed) shortfall doesn't carry; an unsettled daily overspend does
+  assert.equal(carriedOverdue([month(50000, 43000, [{ kind: "borrow", amount: -3000, goal_id: null }])], []).fromBefore, 0);
+  const c = carriedOverdue([month(50000, 40000)], [{ kind: "daily_result", amount: -2500, goal_id: null, done: false }]);
+  assert.deepEqual(c, { fromBefore: 0, dailyOverspend: 2500, total: 2500 });
+  assert.equal(carriedOverdue([], [{ kind: "daily_result", amount: -2500, goal_id: null, done: true }]).total, 0);
+  // and it comes off what's left of this salary
+  assert.equal(moneyLeft(55000, items, [], [], 0, 2500).left, moneyLeft(55000, items, [], [], 0).left - 2500);
 });

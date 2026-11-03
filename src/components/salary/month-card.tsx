@@ -13,6 +13,7 @@ export function MonthCard({
   days,
   goals,
   loanName,
+  owed,
   onSettle,
 }: {
   month: MonthSummary;
@@ -21,11 +22,13 @@ export function MonthCard({
   days: number;
   goals: StoreGoal[];
   loanName: string | null;
+  /** last month's overdue and funds in the red: they come off the leftover first */
+  owed: { fromBefore: number; dailyOverspend: number; fundsOver: number };
   onSettle: (target: string) => Promise<void>;
 }) {
   const [target, setTarget] = useState("");
   const [busy, setBusy] = useState(false);
-  const diff = month.result;
+  const diff = month.result - owed.fromBefore - owed.fundsOver;
   const saved = month.variances.filter((v) => v.diff < 0);
   const over = month.variances.filter((v) => v.diff > 0);
   // Borrow only from goals that have the money (never a locked one); the emergency fund goes last.
@@ -41,7 +44,14 @@ export function MonthCard({
           <p className="text-xs text-muted">
             Salary {inr(salary)} − plan {inr(month.actualTotal)} − daily budget {inr(month.dailyReserve)} (₹{dailyBudget} × {days})
             {month.adjustments !== 0 ? ` − already moved ${inr(month.adjustments)}` : ""}
+            {owed.fromBefore >= 1 ? ` − overdue from last month ${inr(owed.fromBefore)}` : ""}
+            {owed.fundsOver >= 1 ? ` − overspent from funds ${inr(owed.fundsOver)}` : ""}
           </p>
+          {owed.dailyOverspend >= 1 && (
+            <p className="mt-1 text-xs text-bad">
+              Plus {inr(owed.dailyOverspend)} daily overspend from last month: cover it in step 10 below.
+            </p>
+          )}
         </div>
         <p className={`shrink-0 text-xl font-bold tabular-nums ${diff >= -0.5 ? "text-good" : "text-bad"}`}>
           {Math.abs(diff) < 0.5 ? "Balanced ✓" : diff > 0 ? `+${inr(diff)}` : `−${inr(-diff)}`}
