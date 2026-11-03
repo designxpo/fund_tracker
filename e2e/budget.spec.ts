@@ -33,6 +33,8 @@ test("budget saves a future month, validates amounts, and preserves paid actuals
     await route.fulfill({ json: fixtures[table ?? ""] ?? [] });
   });
   await page.goto("/login");
+  // CI builds without Supabase keys show the "not configured" screen instead of the sign-in form.
+  test.skip((await page.getByPlaceholder("Password").count()) === 0, "Supabase isn't configured in this build");
   await page.getByPlaceholder("you@email.com").fill(user.email);
   await page.getByPlaceholder("Password").fill("test-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
